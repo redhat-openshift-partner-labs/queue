@@ -1,0 +1,74 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# Distribution and packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# AI/MCP tooling (local config only)
+.mcp.json
+.claude/
+.serena/
+.playwright/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+docs/plans
+*.tmp
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude session logs (development artifacts)
+**/claude-logs/

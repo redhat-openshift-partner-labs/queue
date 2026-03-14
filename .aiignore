@@ -1,0 +1,43 @@
+# Virtual environments - large, not useful for AI context
+.venv/
+venv/
+ENV/
+
+# Git internals
+.git/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Lock files (large, machine-generated)
+uv.lock
+poetry.lock
+package-lock.json
+
+# IDE settings
+.idea/
+.vscode/
+
+# Test caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# AI/MCP tooling internals
+.claude/
+.serena/
+.playwright/
+
+# Claude session logs (previous AI conversations)
+**/claude-logs/
+
+# Temporary files
+tmp/
+*.tmp
+*.log
