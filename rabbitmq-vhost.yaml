@@ -1,0 +1,30 @@
+# =============================================================================
+# Vhost CR — Dedicated vhost for OPL topology isolation
+# =============================================================================
+# This MUST be applied (and reconciled) before any Queue, Exchange, Binding,
+# or Permission CRs that reference vhost: opl.
+#
+# If using ArgoCD, set a sync-wave annotation to ensure ordering:
+#   argocd.argoproj.io/sync-wave: "-1"
+#
+# Why a dedicated vhost:
+#   - Isolates OPL queues/exchanges from anything else on the broker
+#   - Allows per-vhost resource limits (memory, connection caps)
+#   - Enables clean teardown: deleting the vhost removes all its topology
+#   - Permission scoping becomes simpler (regex patterns apply per-vhost)
+# =============================================================================
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Vhost
+metadata:
+  name: vhost-opl
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  name: opl
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
