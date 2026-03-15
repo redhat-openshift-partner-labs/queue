@@ -28,21 +28,21 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-n8n
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: n8n
 spec:
   tags: []    # no management UI access
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-n8n
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: n8n
@@ -55,7 +55,7 @@ spec:
     write: "^opl\\.intake$"                # publish to intake exchange only
     read: ""                               # does not consume
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
 # worker-etl — consumes intake.raw, publishes intake.normalized + intake.raw.failed
@@ -66,21 +66,21 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-worker-etl
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-etl
 spec:
   tags: []
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-worker-etl
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-etl
@@ -93,7 +93,7 @@ spec:
     write: "^opl\\.intake$"                # publishes normalized + failed via exchange
     read: "^intake\\.raw$"                 # consumes from intake.raw queue
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
 # scribe — the saga orchestrator. Consumes from many queues, publishes to many.
@@ -105,7 +105,7 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-scribe
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: scribe
@@ -113,14 +113,14 @@ spec:
   tags:
     - monitoring      # allow management UI read-only for debugging
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-scribe
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: scribe
@@ -135,7 +135,7 @@ spec:
     # Consumes from normalized, dispatch responses, prov status, day1/day2/handoff results, notifications
     read: "^(intake\\.(normalized|raw\\.failed|dispatch\\.(provision|review|provision-after-review|rejected))|lab\\.(provision\\.(manifests-complete|pr\\.(checks-running|checks-passed|checks-failed|merged)|cluster-(installing|ready|failed))|deprovision\\.(archive-complete|pr\\.merged|cluster-(removing|removed)|failed)|day1\\.(insights|oauth-hub|oauth-spoke|kubeadmin|rbac|ssl)\\.(complete|failed)|day1\\.(complete|failed)|day2\\.task\\.(complete|failed)|day2\\.(complete|failed))|handoff\\.(cluster-ready|credentials\\.(complete|failed)|welcome-email\\.(sent|failed)|complete)|notification\\.(sent|failed))$"
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
 # messenger — Slack bot. Consumes dispatch notifications, publishes dispatch decisions.
@@ -146,21 +146,21 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-messenger
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: messenger
 spec:
   tags: []
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-messenger
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: messenger
@@ -175,7 +175,7 @@ spec:
     # Consumes FYI, review-requested, handoff day1-complete-notify, handoff.complete
     read: "^(intake\\.dispatch\\.(notify-fyi|review-requested)|handoff\\.(day1-complete-notify|complete))$"
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
 # worker-provisioning — consumes generate-manifests, publishes manifests-complete + PR events
@@ -186,21 +186,21 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-worker-provisioning
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-provisioning
 spec:
   tags: []
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-worker-provisioning
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-provisioning
@@ -213,7 +213,7 @@ spec:
     write: "^opl\\.provision$"
     read: "^lab\\.provision\\.generate-manifests$"
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
 # worker-deprovision — consumes deprovision.requested, publishes archive-complete
@@ -224,21 +224,21 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-worker-deprovision
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-deprovision
 spec:
   tags: []
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-worker-deprovision
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-deprovision
@@ -251,7 +251,7 @@ spec:
     write: "^opl\\.deprovision$"
     read: "^lab\\.deprovision\\.requested$"
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
 # provision-watcher — CronJob. Publishes cluster-installing/ready/failed.
@@ -263,21 +263,21 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-provision-watcher
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: provision-watcher
 spec:
   tags: []
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-provision-watcher
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: provision-watcher
@@ -290,7 +290,7 @@ spec:
     write: "^opl\\.provision$"    # publishes cluster-installing, cluster-ready, cluster-failed
     read: ""                       # publish-only — polls K8s, not RabbitMQ
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
 # deprovision-watcher — ArgoCD-managed Job. Publishes cluster-removing/removed/failed.
@@ -301,21 +301,21 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-deprovision-watcher
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: deprovision-watcher
 spec:
   tags: []
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-deprovision-watcher
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: deprovision-watcher
@@ -328,7 +328,7 @@ spec:
     write: "^opl\\.deprovision$"
     read: ""
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
 # worker-day-one — Job orchestrator. Consumes day1 tasks, publishes results.
@@ -339,21 +339,21 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-worker-day-one
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-day-one
 spec:
   tags: []
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-worker-day-one
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-day-one
@@ -367,7 +367,7 @@ spec:
     # Consumes orchestrate + all individual sub-task queues
     read: "^lab\\.day1\\.(orchestrate|insights\\.disable|oauth-hub\\.create|oauth-spoke\\.patch|kubeadmin\\.set|rbac\\.configure|ssl\\.create)$"
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
 # worker-day-two — Same pattern as day-one.
@@ -378,21 +378,21 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-worker-day-two
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-day-two
 spec:
   tags: []
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-worker-day-two
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-day-two
@@ -405,7 +405,7 @@ spec:
     write: "^opl\\.day2$"
     read: "^lab\\.day2\\.(orchestrate|task\\.execute)$"
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
 # worker-credentials — consumes handoff.credentials.create, publishes complete/failed
@@ -416,21 +416,21 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-worker-credentials
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-credentials
 spec:
   tags: []
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-worker-credentials
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-credentials
@@ -443,7 +443,7 @@ spec:
     write: "^opl\\.handoff$"
     read: "^handoff\\.credentials\\.create$"
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
 # worker-notification — consumes notification queues + handoff welcome-email
@@ -454,21 +454,21 @@ apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
   name: user-worker-notification
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-notification
 spec:
   tags: []
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
   name: perm-worker-notification
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/component: worker-notification
@@ -483,4 +483,4 @@ spec:
     # Consumes all notify.* queues + approval-required + handoff welcome-email.send
     read: "^(notify\\.(user|admin)\\.[a-z-]+|lab\\.provision\\.pr\\.approval-required|handoff\\.welcome-email\\.send)$"
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue

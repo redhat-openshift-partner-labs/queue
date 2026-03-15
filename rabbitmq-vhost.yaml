@@ -19,7 +19,7 @@ apiVersion: rabbitmq.com/v1beta1
 kind: Vhost
 metadata:
   name: vhost-opl
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
   annotations:
@@ -27,4 +27,4 @@ metadata:
 spec:
   name: opl
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
