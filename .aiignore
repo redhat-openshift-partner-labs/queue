@@ -41,3 +41,6 @@ htmlcov/
 tmp/
 *.tmp
 *.log
+
+# Additional ignores
+kustomize/
