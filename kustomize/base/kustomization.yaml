@@ -1,0 +1,19 @@
+# =============================================================================
+# Kustomize base — RabbitMQ Messaging Topology
+# =============================================================================
+# Usage:
+#   kustomize build overlays/dev | kubectl apply -f -
+#   kustomize build overlays/prod | kubectl apply -f -
+#
+# Or via ArgoCD application pointing at overlays/{env}
+# =============================================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: queue
+
+resources:
+  - rabbitmq-vhost.yaml                # must sync first (sync-wave: -1)
+  - rabbitmq-topology-manifests.yaml
+  - rabbitmq-users-permissions.yaml

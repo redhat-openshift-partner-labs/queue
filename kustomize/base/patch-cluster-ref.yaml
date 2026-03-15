@@ -1,0 +1,18 @@
+# =============================================================================
+# patch-cluster-ref.yaml
+# =============================================================================
+# This patch is applied via strategic merge to ALL Queue, Exchange, Binding,
+# and Policy CRs. It cannot use a single strategic merge patch for all kinds,
+# so the overlay kustomization.yaml uses a replacements transformer instead.
+#
+# This file exists as documentation — the actual substitution is done via
+# the replacements block in the overlay kustomization.yaml.
+# =============================================================================
+#
+# If your version of Kustomize doesn't support replacements (pre-v4.1),
+# use this sed one-liner instead:
+#
+#   kustomize build base | \
+#     sed 's/name: opl-rabbitmq/name: YOUR_CLUSTER_NAME/g' | \
+#     sed 's/namespace: opl-system/namespace: YOUR_NAMESPACE/g' | \
+#     kubectl apply -f -

@@ -1,0 +1,3252 @@
+# =============================================================================
+# RabbitMQ Messaging Topology Operator — Custom Resource Manifests
+# Generated from: REFERENCE.md (v3) — OpenShift Partner Labs
+# =============================================================================
+#
+# PLACEHOLDER: Replace "opl-rabbitmq" with your actual RabbitmqCluster name.
+# PLACEHOLDER: Replace "opl-system" with your target namespace.
+#
+# CR types generated:
+#   - Queue       (68 queues — all pipelines + DLQs)
+#   - Exchange    (8 exchanges — per-domain topic + 1 DLX)
+#   - Binding     (68 bindings — route each queue to its domain exchange)
+#   - Policy      (2 policies — DLQ routing + quorum queue defaults)
+#
+# Design decisions documented inline. Gaps listed at the bottom.
+# =============================================================================
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXCHANGES
+# ─────────────────────────────────────────────────────────────────────────────
+# Routing model: one topic exchange per domain. Producers publish with
+# routing key = queue name (e.g. "intake.raw"). Consumers bind with exact
+# routing key. This gives per-domain observability and lets you add
+# wildcard consumers later (e.g. "intake.#" for audit logging).
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Exchange
+metadata:
+  name: ex-intake
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+spec:
+  name: opl.intake
+  vhost: opl
+  type: topic
+  durable: true
+  autoDelete: false
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Exchange
+metadata:
+  name: ex-provision
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+spec:
+  name: opl.provision
+  vhost: opl
+  type: topic
+  durable: true
+  autoDelete: false
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Exchange
+metadata:
+  name: ex-deprovision
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+spec:
+  name: opl.deprovision
+  vhost: opl
+  type: topic
+  durable: true
+  autoDelete: false
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Exchange
+metadata:
+  name: ex-day1
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+spec:
+  name: opl.day1
+  vhost: opl
+  type: topic
+  durable: true
+  autoDelete: false
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Exchange
+metadata:
+  name: ex-day2
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day2
+spec:
+  name: opl.day2
+  vhost: opl
+  type: topic
+  durable: true
+  autoDelete: false
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Exchange
+metadata:
+  name: ex-handoff
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: handoff
+spec:
+  name: opl.handoff
+  vhost: opl
+  type: topic
+  durable: true
+  autoDelete: false
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Exchange
+metadata:
+  name: ex-notify
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: notification
+spec:
+  name: opl.notify
+  vhost: opl
+  type: topic
+  durable: true
+  autoDelete: false
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+# Dead-letter exchange — fanout so any DLQ-routed message lands regardless of
+# routing key. Individual queues use x-dead-letter-routing-key to target the
+# correct DLQ.
+apiVersion: rabbitmq.com/v1beta1
+kind: Exchange
+metadata:
+  name: ex-dlx
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: dlq
+spec:
+  name: opl.dlx
+  vhost: opl
+  type: topic
+  durable: true
+  autoDelete: false
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUEUES — Intake Pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-intake-raw
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+    opl.io/consumer: worker-etl
+spec:
+  name: intake.raw
+  vhost: opl
+  type: quorum           # quorum for durability + automatic leader election
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.intake
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-intake-raw-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+    opl.io/consumer: scribe
+spec:
+  name: intake.raw.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.intake
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-intake-normalized
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+    opl.io/consumer: scribe
+spec:
+  name: intake.normalized
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.intake
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUEUES — Dispatch
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dispatch-notify-fyi
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+    opl.io/consumer: messenger
+spec:
+  name: intake.dispatch.notify-fyi
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.intake
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dispatch-review-requested
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+    opl.io/consumer: messenger
+spec:
+  name: intake.dispatch.review-requested
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.intake
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dispatch-provision
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+    opl.io/consumer: scribe
+spec:
+  name: intake.dispatch.provision
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.intake
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dispatch-review
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+    opl.io/consumer: scribe
+spec:
+  name: intake.dispatch.review
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.intake
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dispatch-provision-after-review
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+    opl.io/consumer: scribe
+spec:
+  name: intake.dispatch.provision-after-review
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.intake
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dispatch-rejected
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+    opl.io/consumer: scribe
+spec:
+  name: intake.dispatch.rejected
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.intake
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUEUES — Provisioning Pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-prov-generate-manifests
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+    opl.io/consumer: worker-provisioning
+spec:
+  name: lab.provision.generate-manifests
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-prov-manifests-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+    opl.io/consumer: scribe
+spec:
+  name: lab.provision.manifests-complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-prov-pr-checks-running
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+    opl.io/consumer: scribe
+spec:
+  name: lab.provision.pr.checks-running
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-prov-pr-checks-passed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+    opl.io/consumer: scribe
+spec:
+  name: lab.provision.pr.checks-passed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-prov-pr-checks-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+    opl.io/consumer: scribe
+spec:
+  name: lab.provision.pr.checks-failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-prov-pr-approval-required
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+    opl.io/consumer: worker-notification
+spec:
+  name: lab.provision.pr.approval-required
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-prov-pr-merged
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+    opl.io/consumer: scribe
+spec:
+  name: lab.provision.pr.merged
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-prov-cluster-installing
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+    opl.io/consumer: scribe
+spec:
+  name: lab.provision.cluster-installing
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-prov-cluster-ready
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+    opl.io/consumer: scribe
+spec:
+  name: lab.provision.cluster-ready
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-prov-cluster-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+    opl.io/consumer: scribe
+spec:
+  name: lab.provision.cluster-failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUEUES — Deprovision Pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-deprov-requested
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+    opl.io/consumer: worker-deprovision
+spec:
+  name: lab.deprovision.requested
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.deprovision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-deprov-archive-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+    opl.io/consumer: scribe
+spec:
+  name: lab.deprovision.archive-complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.deprovision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-deprov-pr-merged
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+    opl.io/consumer: scribe
+spec:
+  name: lab.deprovision.pr.merged
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.deprovision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-deprov-cluster-removing
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+    opl.io/consumer: scribe
+spec:
+  name: lab.deprovision.cluster-removing
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.deprovision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-deprov-cluster-removed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+    opl.io/consumer: scribe
+spec:
+  name: lab.deprovision.cluster-removed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.deprovision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-deprov-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+    opl.io/consumer: scribe
+spec:
+  name: lab.deprovision.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.deprovision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUEUES — Day-One Sub-Tasks
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-orchestrate
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: worker-day-one
+spec:
+  name: lab.day1.orchestrate
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-insights-disable
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: worker-day-one
+spec:
+  name: lab.day1.insights.disable
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-insights-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.insights.complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-insights-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.insights.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-oauth-hub-create
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: worker-day-one
+spec:
+  name: lab.day1.oauth-hub.create
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-oauth-hub-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.oauth-hub.complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-oauth-hub-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.oauth-hub.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-oauth-spoke-patch
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: worker-day-one
+spec:
+  name: lab.day1.oauth-spoke.patch
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-oauth-spoke-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.oauth-spoke.complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-oauth-spoke-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.oauth-spoke.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-kubeadmin-set
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: worker-day-one
+spec:
+  name: lab.day1.kubeadmin.set
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-kubeadmin-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.kubeadmin.complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-kubeadmin-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.kubeadmin.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-rbac-configure
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: worker-day-one
+spec:
+  name: lab.day1.rbac.configure
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-rbac-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.rbac.complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-rbac-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.rbac.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-ssl-create
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: worker-day-one
+spec:
+  name: lab.day1.ssl.create
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-ssl-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.ssl.complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-ssl-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.ssl.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day1-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+    opl.io/consumer: scribe
+spec:
+  name: lab.day1.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUEUES — Handoff Pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-handoff-day1-complete-notify
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: handoff
+    opl.io/consumer: messenger
+spec:
+  name: handoff.day1-complete-notify
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.handoff
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-handoff-cluster-ready
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: handoff
+    opl.io/consumer: scribe
+spec:
+  name: handoff.cluster-ready
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.handoff
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-handoff-credentials-create
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: handoff
+    opl.io/consumer: worker-credentials
+spec:
+  name: handoff.credentials.create
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.handoff
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-handoff-credentials-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: handoff
+    opl.io/consumer: scribe
+spec:
+  name: handoff.credentials.complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.handoff
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-handoff-credentials-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: handoff
+    opl.io/consumer: scribe
+spec:
+  name: handoff.credentials.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.handoff
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-handoff-welcome-email-send
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: handoff
+    opl.io/consumer: worker-notification
+spec:
+  name: handoff.welcome-email.send
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.handoff
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-handoff-welcome-email-sent
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: handoff
+    opl.io/consumer: scribe
+spec:
+  name: handoff.welcome-email.sent
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.handoff
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-handoff-welcome-email-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: handoff
+    opl.io/consumer: scribe
+spec:
+  name: handoff.welcome-email.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.handoff
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-handoff-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: handoff
+    opl.io/consumer: scribe
+spec:
+  name: handoff.complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.handoff
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUEUES — Day-Two Operations
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day2-orchestrate
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day2
+    opl.io/consumer: worker-day-two
+spec:
+  name: lab.day2.orchestrate
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day2
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day2-task-execute
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day2
+    opl.io/consumer: worker-day-two
+spec:
+  name: lab.day2.task.execute
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day2
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day2-task-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day2
+    opl.io/consumer: scribe
+spec:
+  name: lab.day2.task.complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day2
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day2-task-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day2
+    opl.io/consumer: scribe
+spec:
+  name: lab.day2.task.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day2
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day2-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day2
+    opl.io/consumer: scribe
+spec:
+  name: lab.day2.complete
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day2
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-day2-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day2
+    opl.io/consumer: scribe
+spec:
+  name: lab.day2.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.day2
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUEUES — Notifications
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-notify-user-lab-ready
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: notification
+    opl.io/consumer: worker-notification
+spec:
+  name: notify.user.lab-ready
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.notification
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-notify-user-lab-deprovisioned
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: notification
+    opl.io/consumer: worker-notification
+spec:
+  name: notify.user.lab-deprovisioned
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.notification
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-notify-user-lab-expiring
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: notification
+    opl.io/consumer: worker-notification
+spec:
+  name: notify.user.lab-expiring
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.notification
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-notify-admin-failure
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: notification
+    opl.io/consumer: worker-notification
+spec:
+  name: notify.admin.failure
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.notification
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-notify-admin-timeout
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: notification
+    opl.io/consumer: worker-notification
+spec:
+  name: notify.admin.timeout
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.notification
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-notification-sent
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: notification
+    opl.io/consumer: scribe
+spec:
+  name: notification.sent
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.notification
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-notification-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: notification
+    opl.io/consumer: scribe
+spec:
+  name: notification.failed
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.notification
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUEUES — Dead Letter Queues
+# ─────────────────────────────────────────────────────────────────────────────
+# DLQs are classic queues (no redelivery limit on DLQs themselves).
+# Messages land here after exhausting x-delivery-limit on the source queue.
+# Operational team monitors these for stuck/poisoned messages.
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dlq-intake
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: dlq
+spec:
+  name: dlq.intake
+  vhost: opl
+  type: quorum
+  durable: true
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dlq-provision
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: dlq
+spec:
+  name: dlq.provision
+  vhost: opl
+  type: quorum
+  durable: true
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dlq-deprovision
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: dlq
+spec:
+  name: dlq.deprovision
+  vhost: opl
+  type: quorum
+  durable: true
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dlq-day1
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: dlq
+spec:
+  name: dlq.day1
+  vhost: opl
+  type: quorum
+  durable: true
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dlq-handoff
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: dlq
+spec:
+  name: dlq.handoff
+  vhost: opl
+  type: quorum
+  durable: true
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dlq-day2
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: dlq
+spec:
+  name: dlq.day2
+  vhost: opl
+  type: quorum
+  durable: true
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dlq-notification
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: dlq
+spec:
+  name: dlq.notification
+  vhost: opl
+  type: quorum
+  durable: true
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: q-dlq-generic
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: dlq
+spec:
+  name: dlq.generic
+  vhost: opl
+  type: quorum
+  durable: true
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BINDINGS — Exchange → Queue (one per queue)
+# ─────────────────────────────────────────────────────────────────────────────
+# Routing key = the queue name. Producers publish to the domain exchange
+# with routing key matching the logical queue name.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# --- Intake domain bindings ---
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-intake-raw
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+spec:
+  vhost: opl
+  source: opl.intake
+  destination: intake.raw
+  destinationType: queue
+  routingKey: intake.raw
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-intake-raw-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+spec:
+  vhost: opl
+  source: opl.intake
+  destination: intake.raw.failed
+  destinationType: queue
+  routingKey: intake.raw.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-intake-normalized
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+spec:
+  vhost: opl
+  source: opl.intake
+  destination: intake.normalized
+  destinationType: queue
+  routingKey: intake.normalized
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dispatch-notify-fyi
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+spec:
+  vhost: opl
+  source: opl.intake
+  destination: intake.dispatch.notify-fyi
+  destinationType: queue
+  routingKey: intake.dispatch.notify-fyi
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dispatch-review-requested
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+spec:
+  vhost: opl
+  source: opl.intake
+  destination: intake.dispatch.review-requested
+  destinationType: queue
+  routingKey: intake.dispatch.review-requested
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dispatch-provision
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+spec:
+  vhost: opl
+  source: opl.intake
+  destination: intake.dispatch.provision
+  destinationType: queue
+  routingKey: intake.dispatch.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dispatch-review
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+spec:
+  vhost: opl
+  source: opl.intake
+  destination: intake.dispatch.review
+  destinationType: queue
+  routingKey: intake.dispatch.review
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dispatch-prov-after-review
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+spec:
+  vhost: opl
+  source: opl.intake
+  destination: intake.dispatch.provision-after-review
+  destinationType: queue
+  routingKey: intake.dispatch.provision-after-review
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dispatch-rejected
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: intake
+spec:
+  vhost: opl
+  source: opl.intake
+  destination: intake.dispatch.rejected
+  destinationType: queue
+  routingKey: intake.dispatch.rejected
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# --- Provision domain bindings ---
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-prov-generate-manifests
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+spec:
+  vhost: opl
+  source: opl.provision
+  destination: lab.provision.generate-manifests
+  destinationType: queue
+  routingKey: lab.provision.generate-manifests
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-prov-manifests-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+spec:
+  vhost: opl
+  source: opl.provision
+  destination: lab.provision.manifests-complete
+  destinationType: queue
+  routingKey: lab.provision.manifests-complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-prov-pr-checks-running
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+spec:
+  vhost: opl
+  source: opl.provision
+  destination: lab.provision.pr.checks-running
+  destinationType: queue
+  routingKey: lab.provision.pr.checks-running
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-prov-pr-checks-passed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+spec:
+  vhost: opl
+  source: opl.provision
+  destination: lab.provision.pr.checks-passed
+  destinationType: queue
+  routingKey: lab.provision.pr.checks-passed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-prov-pr-checks-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+spec:
+  vhost: opl
+  source: opl.provision
+  destination: lab.provision.pr.checks-failed
+  destinationType: queue
+  routingKey: lab.provision.pr.checks-failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-prov-pr-approval-required
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+spec:
+  vhost: opl
+  source: opl.provision
+  destination: lab.provision.pr.approval-required
+  destinationType: queue
+  routingKey: lab.provision.pr.approval-required
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-prov-pr-merged
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+spec:
+  vhost: opl
+  source: opl.provision
+  destination: lab.provision.pr.merged
+  destinationType: queue
+  routingKey: lab.provision.pr.merged
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-prov-cluster-installing
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+spec:
+  vhost: opl
+  source: opl.provision
+  destination: lab.provision.cluster-installing
+  destinationType: queue
+  routingKey: lab.provision.cluster-installing
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-prov-cluster-ready
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+spec:
+  vhost: opl
+  source: opl.provision
+  destination: lab.provision.cluster-ready
+  destinationType: queue
+  routingKey: lab.provision.cluster-ready
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-prov-cluster-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: provision
+spec:
+  vhost: opl
+  source: opl.provision
+  destination: lab.provision.cluster-failed
+  destinationType: queue
+  routingKey: lab.provision.cluster-failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# --- Deprovision domain bindings ---
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-deprov-requested
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+spec:
+  vhost: opl
+  source: opl.deprovision
+  destination: lab.deprovision.requested
+  destinationType: queue
+  routingKey: lab.deprovision.requested
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-deprov-archive-complete
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+spec:
+  vhost: opl
+  source: opl.deprovision
+  destination: lab.deprovision.archive-complete
+  destinationType: queue
+  routingKey: lab.deprovision.archive-complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-deprov-pr-merged
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+spec:
+  vhost: opl
+  source: opl.deprovision
+  destination: lab.deprovision.pr.merged
+  destinationType: queue
+  routingKey: lab.deprovision.pr.merged
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-deprov-cluster-removing
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+spec:
+  vhost: opl
+  source: opl.deprovision
+  destination: lab.deprovision.cluster-removing
+  destinationType: queue
+  routingKey: lab.deprovision.cluster-removing
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-deprov-cluster-removed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+spec:
+  vhost: opl
+  source: opl.deprovision
+  destination: lab.deprovision.cluster-removed
+  destinationType: queue
+  routingKey: lab.deprovision.cluster-removed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-deprov-failed
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: deprovision
+spec:
+  vhost: opl
+  source: opl.deprovision
+  destination: lab.deprovision.failed
+  destinationType: queue
+  routingKey: lab.deprovision.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# --- Day-1 domain bindings ---
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-orchestrate
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: day1
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.orchestrate
+  destinationType: queue
+  routingKey: lab.day1.orchestrate
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-insights-disable
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.insights.disable
+  destinationType: queue
+  routingKey: lab.day1.insights.disable
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-insights-complete
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.insights.complete
+  destinationType: queue
+  routingKey: lab.day1.insights.complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-insights-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.insights.failed
+  destinationType: queue
+  routingKey: lab.day1.insights.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-oauth-hub-create
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.oauth-hub.create
+  destinationType: queue
+  routingKey: lab.day1.oauth-hub.create
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-oauth-hub-complete
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.oauth-hub.complete
+  destinationType: queue
+  routingKey: lab.day1.oauth-hub.complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-oauth-hub-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.oauth-hub.failed
+  destinationType: queue
+  routingKey: lab.day1.oauth-hub.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-oauth-spoke-patch
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.oauth-spoke.patch
+  destinationType: queue
+  routingKey: lab.day1.oauth-spoke.patch
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-oauth-spoke-complete
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.oauth-spoke.complete
+  destinationType: queue
+  routingKey: lab.day1.oauth-spoke.complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-oauth-spoke-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.oauth-spoke.failed
+  destinationType: queue
+  routingKey: lab.day1.oauth-spoke.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-kubeadmin-set
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.kubeadmin.set
+  destinationType: queue
+  routingKey: lab.day1.kubeadmin.set
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-kubeadmin-complete
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.kubeadmin.complete
+  destinationType: queue
+  routingKey: lab.day1.kubeadmin.complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-kubeadmin-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.kubeadmin.failed
+  destinationType: queue
+  routingKey: lab.day1.kubeadmin.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-rbac-configure
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.rbac.configure
+  destinationType: queue
+  routingKey: lab.day1.rbac.configure
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-rbac-complete
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.rbac.complete
+  destinationType: queue
+  routingKey: lab.day1.rbac.complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-rbac-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.rbac.failed
+  destinationType: queue
+  routingKey: lab.day1.rbac.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-ssl-create
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.ssl.create
+  destinationType: queue
+  routingKey: lab.day1.ssl.create
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-ssl-complete
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.ssl.complete
+  destinationType: queue
+  routingKey: lab.day1.ssl.complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-ssl-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.ssl.failed
+  destinationType: queue
+  routingKey: lab.day1.ssl.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-complete
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.complete
+  destinationType: queue
+  routingKey: lab.day1.complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day1-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day1
+  destination: lab.day1.failed
+  destinationType: queue
+  routingKey: lab.day1.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# --- Handoff domain bindings ---
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-handoff-day1-complete-notify
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.handoff
+  destination: handoff.day1-complete-notify
+  destinationType: queue
+  routingKey: handoff.day1-complete-notify
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-handoff-cluster-ready
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.handoff
+  destination: handoff.cluster-ready
+  destinationType: queue
+  routingKey: handoff.cluster-ready
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-handoff-credentials-create
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.handoff
+  destination: handoff.credentials.create
+  destinationType: queue
+  routingKey: handoff.credentials.create
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-handoff-credentials-complete
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.handoff
+  destination: handoff.credentials.complete
+  destinationType: queue
+  routingKey: handoff.credentials.complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-handoff-credentials-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.handoff
+  destination: handoff.credentials.failed
+  destinationType: queue
+  routingKey: handoff.credentials.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-handoff-welcome-email-send
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.handoff
+  destination: handoff.welcome-email.send
+  destinationType: queue
+  routingKey: handoff.welcome-email.send
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-handoff-welcome-email-sent
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.handoff
+  destination: handoff.welcome-email.sent
+  destinationType: queue
+  routingKey: handoff.welcome-email.sent
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-handoff-welcome-email-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.handoff
+  destination: handoff.welcome-email.failed
+  destinationType: queue
+  routingKey: handoff.welcome-email.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-handoff-complete
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.handoff
+  destination: handoff.complete
+  destinationType: queue
+  routingKey: handoff.complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# --- Day-2 domain bindings ---
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day2-orchestrate
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day2
+  destination: lab.day2.orchestrate
+  destinationType: queue
+  routingKey: lab.day2.orchestrate
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day2-task-execute
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day2
+  destination: lab.day2.task.execute
+  destinationType: queue
+  routingKey: lab.day2.task.execute
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day2-task-complete
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day2
+  destination: lab.day2.task.complete
+  destinationType: queue
+  routingKey: lab.day2.task.complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day2-task-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day2
+  destination: lab.day2.task.failed
+  destinationType: queue
+  routingKey: lab.day2.task.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day2-complete
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day2
+  destination: lab.day2.complete
+  destinationType: queue
+  routingKey: lab.day2.complete
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-day2-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.day2
+  destination: lab.day2.failed
+  destinationType: queue
+  routingKey: lab.day2.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# --- Notification domain bindings ---
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-notify-user-lab-ready
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.notify
+  destination: notify.user.lab-ready
+  destinationType: queue
+  routingKey: notify.user.lab-ready
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-notify-user-lab-deprovisioned
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.notify
+  destination: notify.user.lab-deprovisioned
+  destinationType: queue
+  routingKey: notify.user.lab-deprovisioned
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-notify-user-lab-expiring
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.notify
+  destination: notify.user.lab-expiring
+  destinationType: queue
+  routingKey: notify.user.lab-expiring
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-notify-admin-failure
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.notify
+  destination: notify.admin.failure
+  destinationType: queue
+  routingKey: notify.admin.failure
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-notify-admin-timeout
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.notify
+  destination: notify.admin.timeout
+  destinationType: queue
+  routingKey: notify.admin.timeout
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-notification-sent
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.notify
+  destination: notification.sent
+  destinationType: queue
+  routingKey: notification.sent
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-notification-failed
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.notify
+  destination: notification.failed
+  destinationType: queue
+  routingKey: notification.failed
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# --- DLQ bindings (DLX → DLQ queues) ---
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dlq-intake
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.dlx
+  destination: dlq.intake
+  destinationType: queue
+  routingKey: dlq.intake
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dlq-provision
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.dlx
+  destination: dlq.provision
+  destinationType: queue
+  routingKey: dlq.provision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dlq-deprovision
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.dlx
+  destination: dlq.deprovision
+  destinationType: queue
+  routingKey: dlq.deprovision
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dlq-day1
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.dlx
+  destination: dlq.day1
+  destinationType: queue
+  routingKey: dlq.day1
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dlq-handoff
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.dlx
+  destination: dlq.handoff
+  destinationType: queue
+  routingKey: dlq.handoff
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dlq-day2
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.dlx
+  destination: dlq.day2
+  destinationType: queue
+  routingKey: dlq.day2
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dlq-notification
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.dlx
+  destination: dlq.notification
+  destinationType: queue
+  routingKey: dlq.notification
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-dlq-generic
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.dlx
+  destination: dlq.generic
+  destinationType: queue
+  routingKey: dlq.generic
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POLICIES
+# ─────────────────────────────────────────────────────────────────────────────
+# Policies are the recommended way to manage queue arguments at scale.
+# They apply at runtime and can be updated without recreating queues.
+# The per-queue x-* arguments above act as initial defaults; policies override.
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+# Policy: DLQ message TTL — expire poison messages in DLQs after 30 days
+# so they don't accumulate indefinitely. Ops should drain/investigate sooner.
+apiVersion: rabbitmq.com/v1beta1
+kind: Policy
+metadata:
+  name: pol-dlq-ttl
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: dlq
+spec:
+  name: opl-dlq-ttl
+  vhost: opl
+  pattern: "^dlq\\."
+  applyTo: queues
+  priority: 0
+  definition:
+    message-ttl: 2592000000    # 30 days in ms
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TTL TIERING STRATEGY
+# ─────────────────────────────────────────────────────────────────────────────
+# RabbitMQ applies ONE policy per queue (highest priority match wins).
+# Therefore every TTL policy must also carry delivery-limit and DLX config,
+# otherwise those properties would be lost when the TTL policy takes precedence
+# over a lower-priority delivery-limit-only policy.
+#
+# Tiers:
+#
+#   TIER 1 — Status/event queues (24h / 86400000 ms)
+#     Pattern: *.complete, *.failed, *.sent, *.installing, *.ready, *.removing,
+#              *.removed, notification.sent, notification.failed
+#     Why 24h: These are state-change notifications. If the consumer hasn't
+#     processed them within a day, the cluster state has already moved on.
+#     Replaying a stale "cluster-installing" when it's already been ready for
+#     20 hours would be confusing at best.
+#
+#   TIER 2 — Task/command queues (72h / 259200000 ms)
+#     Pattern: *.orchestrate, *.generate-manifests, *.requested, *.create,
+#              *.set, *.patch, *.configure, *.execute, *.send, *.disable,
+#              intake.raw, intake.normalized
+#     Why 72h: These are imperative work orders. Missing one means work
+#     doesn't happen. 72h gives ops a full weekend to notice and fix a dead
+#     consumer before the command expires and dead-letters.
+#
+#   TIER 3 — Human-gated/dispatch queues (168h / 7 days / 604800000 ms)
+#     Pattern: intake.dispatch.*, handoff.cluster-ready, handoff.day1-complete-notify
+#     Why 7 days: These involve human decisions (Slack buttons, review,
+#     /cluster ready). Humans are slow. PTO, weekends, async review cycles.
+#
+# Priority ordering: tier-specific (priority 10) > DLQ TTL (priority 0).
+# A catch-all safety net at priority 0 handles any queue that doesn't match
+# a tier pattern, ensuring no queue runs without delivery-limit + DLX.
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+# TIER 1: Status/event queues — 24h TTL
+# Matches: *.complete, *.failed, *.sent, *.installing, *.ready, *.removing,
+#          *.removed, *.merged, *.running, *.passed (dot or hyphen delimited),
+#          plus all notify.* and notification.* queues
+apiVersion: rabbitmq.com/v1beta1
+kind: Policy
+metadata:
+  name: pol-ttl-status-24h
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/ttl-tier: status
+spec:
+  name: opl-ttl-status-24h
+  vhost: opl
+  pattern: "(\\.(complete|failed|sent|installing|ready|removing|removed|merged|running|passed)$|-(complete|failed|installing|ready|removing|removed|passed|running|required)$|^notify\\.|^notification\\.)"
+  applyTo: quorum_queues
+  priority: 10
+  definition:
+    message-ttl: 86400000          # 24 hours in ms
+    delivery-limit: 5
+    dead-letter-exchange: opl.dlx
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+# TIER 2: Task/command queues — 72h TTL
+# Matches: intake.raw, intake.normalized, *.orchestrate, *.generate-manifests,
+#          *.requested, *.create, *.set, *.patch, *.configure, *.execute,
+#          *.send, *.disable
+apiVersion: rabbitmq.com/v1beta1
+kind: Policy
+metadata:
+  name: pol-ttl-task-72h
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/ttl-tier: task
+spec:
+  name: opl-ttl-task-72h
+  vhost: opl
+  pattern: "(^intake\\.(raw|normalized)$|\\.(orchestrate|generate-manifests|requested|create|set|patch|configure|execute|send|disable)$)"
+  applyTo: quorum_queues
+  priority: 10
+  definition:
+    message-ttl: 259200000         # 72 hours in ms
+    delivery-limit: 5
+    dead-letter-exchange: opl.dlx
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+# TIER 3: Human-gated/dispatch queues — 7 day TTL
+# Matches: intake.dispatch.*, handoff.cluster-ready, handoff.day1-complete-notify
+# Priority 11 beats T1/T2 (priority 10) for handoff.cluster-ready which also
+# matches the T1 "ready" suffix. More-specific human-gated classification wins.
+apiVersion: rabbitmq.com/v1beta1
+kind: Policy
+metadata:
+  name: pol-ttl-dispatch-7d
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/ttl-tier: dispatch
+spec:
+  name: opl-ttl-dispatch-7d
+  vhost: opl
+  pattern: "^(intake\\.dispatch\\.|handoff\\.(cluster-ready|day1-complete-notify))"
+  applyTo: quorum_queues
+  priority: 11
+  definition:
+    message-ttl: 604800000         # 7 days in ms
+    delivery-limit: 5
+    dead-letter-exchange: opl.dlx
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+# SAFETY NET: Catch-all delivery-limit + DLX for any queue not matched above.
+# Priority 0 — tier policies at priority 10 take precedence where they match.
+# This ensures no application queue runs unbounded even if a new queue name is
+# added that doesn't fit an existing tier pattern.
+apiVersion: rabbitmq.com/v1beta1
+kind: Policy
+metadata:
+  name: pol-default-delivery-limit
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+spec:
+  name: opl-default-delivery-limit
+  vhost: opl
+  pattern: "^(intake\\.|lab\\.|handoff\\.|notify\\.|notification\\.)"
+  applyTo: quorum_queues
+  priority: 0
+  definition:
+    delivery-limit: 5
+    dead-letter-exchange: opl.dlx
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
