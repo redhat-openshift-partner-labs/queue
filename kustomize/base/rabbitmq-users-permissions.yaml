@@ -20,18 +20,18 @@
 # =============================================================================
 
 # ─────────────────────────────────────────────────────────────────────────────
-# n8n — publishes to intake.raw only
+# workflow-engine — publishes to intake.raw only
 # ─────────────────────────────────────────────────────────────────────────────
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
-  name: user-n8n
+  name: user-workflow-engine
   namespace: opl-system
   labels:
     app.kubernetes.io/part-of: opl
-    opl.io/component: n8n
+    opl.io/component: workflow-engine
 spec:
   tags: []    # no management UI access
   rabbitmqClusterReference:
@@ -41,15 +41,15 @@ spec:
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
-  name: perm-n8n
+  name: perm-workflow-engine
   namespace: opl-system
   labels:
     app.kubernetes.io/part-of: opl
-    opl.io/component: n8n
+    opl.io/component: workflow-engine
 spec:
   vhost: opl
   userReference:
-    name: user-n8n
+    name: user-workflow-engine
   permissions:
     configure: ""                          # cannot declare anything
     write: "^opl\\.intake$"                # publish to intake exchange only

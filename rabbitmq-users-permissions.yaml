@@ -20,18 +20,18 @@
 # =============================================================================
 
 # ─────────────────────────────────────────────────────────────────────────────
-# n8n — publishes to intake.raw only
+# workflow-engine — publishes to intake.raw only
 # ─────────────────────────────────────────────────────────────────────────────
 
 ---
 apiVersion: rabbitmq.com/v1beta1
 kind: User
 metadata:
-  name: user-n8n
+  name: user-workflow-engine
   namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
-    opl.io/component: n8n
+    opl.io/component: workflow-engine
 spec:
   tags: []    # no management UI access
   rabbitmqClusterReference:
@@ -41,15 +41,15 @@ spec:
 apiVersion: rabbitmq.com/v1beta1
 kind: Permission
 metadata:
-  name: perm-n8n
+  name: perm-workflow-engine
   namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
-    opl.io/component: n8n
+    opl.io/component: workflow-engine
 spec:
   vhost: opl
   userReference:
-    name: user-n8n
+    name: user-workflow-engine
   permissions:
     configure: ""                          # cannot declare anything
     write: "^opl\\.intake$"                # publish to intake exchange only
@@ -132,7 +132,8 @@ spec:
     configure: ""
     # Publishes to all domain exchanges
     write: "^opl\\.(intake|provision|deprovision|day1|day2|handoff|notify)$"
-    # Consumes from normalized, dispatch responses, prov status, day1/day2/handoff results, notifications
+    # Consumes from intake, provision status, deprovision status, day1/day2 results, handoff results, notifications
+    # Split across multiple queues bound to their respective exchanges
     read: "^(intake\\.(normalized|raw\\.failed|dispatch\\.(provision|review|provision-after-review|rejected))|lab\\.(provision\\.(manifests-complete|pr\\.(checks-running|checks-passed|checks-failed|merged)|cluster-(installing|ready|failed))|deprovision\\.(archive-complete|pr\\.merged|cluster-(removing|removed)|failed)|day1\\.(insights|oauth-hub|oauth-spoke|kubeadmin|rbac|ssl)\\.(complete|failed)|day1\\.(complete|failed)|day2\\.task\\.(complete|failed)|day2\\.(complete|failed))|handoff\\.(cluster-ready|credentials\\.(complete|failed)|welcome-email\\.(sent|failed)|complete)|notification\\.(sent|failed))$"
   rabbitmqClusterReference:
     name: queue
