@@ -27,105 +27,47 @@
 
 ## Architecture: Component Map
 
-```
-                    INTAKE PIPELINE
-                    ═══════════════
+```mermaid
+flowchart TB
+    subgraph INTAKE["INTAKE PIPELINE"]
+        GF[Google Form] --> GS[Google Sheet<br/>Tab 1: raw responses]
+        GS -->|"formula mirrors to Tab 2<br/>(custom headers)"| GS
+        GS -->|"AppScript POST<br/>(on approval)"| n8n[n8n<br/>source auth]
+        n8n -->|publish| Q_RAW[(intake.raw)]
+        Q_RAW --> ETL[worker-etl<br/>ensures keys fit schema]
+        ETL -->|publish| Q_NORM[(intake.normalized)]
+    end
 
-Google Form ──► Google Sheet (Tab 1: raw form responses)
-                     │
-                     │ formula mirrors to Tab 2 (custom headers)
-                     │
-                     │ when column in Tab 1 = "approved":
-                     │ AppScript sends Tab 2 row as JSON
-                     ▼
-               ┌─────────────┐     ┌──────────────┐
-               │  n8n (hub)   │────►│ intake.raw    │ (RabbitMQ)
-               │ source auth  │     └──────┬───────┘
-               └─────────────┘            │
-                                          ▼
-                                   ┌──────────────┐
-                                   │  worker-etl   │ ensures keys fit schema
-                                   └──────┬───────┘
-                                          │
-                                          ▼
-                                   ┌──────────────────────┐
-                                   │ intake.normalized     │ (RabbitMQ)
-                                   └──────┬───────────────┘
-                                          │
-                    CORE SYSTEM           ▼
-                    ═══════════   ┌──────────────┐
-                                 │    scribe     │ persists to DB, evaluates policy
-                                 └──────┬───────┘
-                                        │
-                              ┌─────────┴─────────┐
-                              │                   │
-                        standard config      non-standard
-                              │                   │
-                    ┌─────────┴────────┐         │
-                    │                  │          │
-                    ▼                  ▼          ▼
-            ┌──────────────┐  ┌────────────┐  ┌────────────────────┐
-            │ provision    │  │ Slack FYI  │  │ Slack interactive   │
-            │ starts now   │  │ (no btns)  │  │ Provision / Review  │
-            └──────┬───────┘  └────────────┘  └────────┬───────────┘
-                   │                                    │
-                   │                          ┌─────────┴──────────┐
-                   │                          │                    │
-                   │                      Provision             Review
-                   │                          │                    │
-                   ▼                          ▼                    ▼
-           ┌───────────────────────────────────┐       ┌──────────────┐
-           │ lab.provision.generate-manifests   │       │ pending_     │
-           └──────────────┬────────────────────┘       │ review       │
-                          │                            └──────────────┘
-                          ▼
-                    PROVISIONING PIPELINE
-                    ════════════════════
+    subgraph CORE["CORE SYSTEM"]
+        Q_NORM --> Scribe[scribe<br/>persists to DB<br/>evaluates policy]
+        Scribe -->|standard config| Provision[Start Provisioning]
+        Scribe -->|standard config| SlackFYI[Slack FYI<br/>no buttons]
+        Scribe -->|non-standard| SlackInt[Slack Interactive<br/>Provision / Review]
+        SlackInt -->|Provision clicked| Provision
+        SlackInt -->|Review clicked| PendingReview[pending_review]
+        PendingReview -->|Provision after review| Provision
+        PendingReview -->|Reject| Rejected[rejected]
+    end
 
-           ┌──────────────────────────────────────────────────────┐
-           │  worker-provisioning                                 │
-           │  • builds manifests from message data                │
-           │  • opens PR in gitops repo                           │
-           └──────────────┬───────────────────────────────────────┘
-                          │
-                          ▼
-           ┌──────────────────────────────────────────────────────┐
-           │  GitHub repo checks                                  │
-           │  • validate manifests                                │
-           │  • auto-merge on pass (default) or wait for human    │
-           └──────────────┬───────────────────────────────────────┘
-                          │
-                          ▼
-           ┌──────────────────────────────────────────────────────┐
-           │  ArgoCD (app-of-apps)                                │
-           │  • detects new subfolder with argocd-application.yaml│
-           │  • syncs → ACM creates ClusterDeployment             │
-           │  • cluster provisioning begins                       │
-           └──────────────┬───────────────────────────────────────┘
-                          │
-                          ▼
-           ┌──────────────────────────────────────────────────────┐
-           │  provision-watcher (standalone CronJob on hub)       │
-           │  • polls every minute for ClusterProvision status    │
-           │  • detects cluster ready + operators settled         │
-           │  • publishes cluster-ready to RabbitMQ               │
-           │  • hub-native: no external creds needed              │
-           └──────────────┬───────────────────────────────────────┘
-                          │
-                          ▼
-                    DAY-ONE PIPELINE
-                    ════════════════
+    subgraph PROV["PROVISIONING PIPELINE"]
+        Provision -->|publish| Q_GEN[(lab.provision<br/>.generate-manifests)]
+        Q_GEN --> WorkerProv[worker-provisioning<br/>builds manifests<br/>opens PR]
+        WorkerProv --> GitHub[GitHub repo checks<br/>validate manifests<br/>auto-merge or wait]
+        GitHub --> ArgoCD[ArgoCD app-of-apps<br/>syncs subfolder<br/>ACM creates ClusterDeployment]
+        ArgoCD --> ProvWatch[provision-watcher<br/>CronJob polls status<br/>hub-native]
+        ProvWatch -->|publish cluster-ready| Q_READY[(lab.provision<br/>.cluster-ready)]
+    end
 
-           ┌──────────────────────────────────────────────────────┐
-           │  worker-day-one (Job orchestrator on hub)            │
-           │  • reads sub-task messages from RabbitMQ             │
-           │  • creates/triggers K8s Jobs on hub cluster          │
-           │  • Jobs run with hub SA — no external kubeconfig     │
-           │  • watches Job completion, reports back to queue     │
-           │                                                      │
-           │  Tasks: insights disable, OAuth (hub+spoke), SSL,    │
-           │         kubeadmin, RBAC                              │
-           └──────────────────────────────────────────────────────┘
+    subgraph DAYONE["DAY-ONE PIPELINE"]
+        Q_READY --> WorkerD1[worker-day-one<br/>Job orchestrator on hub]
+        WorkerD1 -->|creates K8s Jobs| Jobs[Hub Jobs<br/>insights, OAuth, SSL<br/>kubeadmin, RBAC]
+        Jobs -->|completion| WorkerD1
+        WorkerD1 -->|publish| Q_D1DONE[(lab.day1.complete)]
+    end
+
+    INTAKE --> CORE
+    CORE --> PROV
+    PROV --> DAYONE
 ```
 
 ### Component Inventory
@@ -152,93 +94,77 @@ Google Form ──► Google Sheet (Tab 1: raw form responses)
 
 ## Lab State Machine
 
-```
-[*] ──► intake_received           (n8n got the payload)
-         │
-         ▼
-        intake_transforming        (ETL worker processing)
-         │
-         ▼
-        intake_stored              (Scribe persisted to DB)
-         │
-         ├── standard config ─────► manifests_generating
-         │   (Slack FYI in            (provisioning starts immediately)
-         │    parallel, no btns)
-         │
-         └── non-standard ────────► dispatch_review_requested
-              (Slack interactive      │
-               Provision/Review)      ├── Provision ──► manifests_generating
-                                      │
-                                      └── Review ──────► pending_review
-                                                          │
-                                                          ├── Provision ──► manifests_generating
-                                                          └── Reject ──────► rejected ──► [*]
+```mermaid
+stateDiagram-v2
+    [*] --> intake_received: n8n got payload
 
-    PROVISION PIPELINE
-    ══════════════════
-    manifests_generating
-         │
-         ▼
-    pr_opened
-         │
-         ▼
-    pr_checks_running
-         │
-         ├── pr_checks_passed ──► pr_merged (default: auto-merge)
-         │                             │
-         │   (override: pending_approval ──► pr_merged)
-         │
-         └── pr_checks_failed ──► failed
+    state INTAKE {
+        intake_received --> intake_transforming: ETL processing
+        intake_transforming --> intake_stored: Scribe persisted
+    }
 
-    pr_merged
-         │
-         ▼
-    cluster_installing             (ArgoCD synced, ACM provisioning)
-         │
-         ├── cluster_ready ──► active ──► [day-one saga]
-         └── cluster_failed ──► failed
+    state DISPATCH {
+        intake_stored --> manifests_generating: standard config<br/>(Slack FYI parallel)
+        intake_stored --> dispatch_review_requested: non-standard<br/>(Slack interactive)
+        dispatch_review_requested --> manifests_generating: Provision clicked
+        dispatch_review_requested --> pending_review: Review clicked
+        pending_review --> manifests_generating: Provision after review
+        pending_review --> rejected: Reject
+        rejected --> [*]
+    }
 
-    DAY-ONE (all execute as hub-cluster Jobs)
-    ════════
-    active
-         │
-         ├─► insights_disabling
-         ├─► ssl_creating
-         ├─► oauth_hub_creating
-         ├─► kubeadmin_setting
-         │
-         │   ... dependency chain ...
-         │
-         ├─► oauth_spoke_patching    (after oauth_hub)
-         └─► rbac_configuring        (after kubeadmin + oauth_spoke)
-              │
-              ▼
-         day_one_complete
+    state PROVISION {
+        manifests_generating --> pr_opened
+        pr_opened --> pr_checks_running
+        pr_checks_running --> pr_checks_passed
+        pr_checks_running --> pr_checks_failed
+        pr_checks_passed --> pr_merged: auto-merge (default)
+        pr_checks_passed --> pending_approval: override
+        pending_approval --> pr_merged: human approves
+        pr_checks_failed --> failed
+        pr_merged --> cluster_installing: ArgoCD synced
+        cluster_installing --> cluster_ready
+        cluster_installing --> cluster_failed
+        cluster_failed --> failed
+        cluster_ready --> active
+    }
 
-    HANDOFF (after day-one)
-    ═══════
-    day_one_complete
-         │
-         ▼
-    pending_handoff_verification   (Slack notifies day-one done)
-         │
-         │  human runs /cluster {id} ready
-         ▼
-    handoff_initiated              (credentials generation started)
-         │
-         ▼
-    credentials_created            (PrivateBin paste created)
-         │
-         ▼
-    welcome_email_sending
-         │
-         ├── welcome_email_sent ──► handoff_complete
-         └── welcome_email_failed ──► failed
+    state DAY_ONE {
+        active --> insights_disabling
+        active --> ssl_creating
+        active --> oauth_hub_creating
+        active --> kubeadmin_setting
 
-    DEPROVISION
-    ═══════════
-    active ──► deprovision_pr_opened ──► deprovision_pr_merged
-           ──► cluster_deprovisioning ──► deprovisioned ──► [*]
+        oauth_hub_creating --> oauth_spoke_patching: depends on oauth_hub
+        kubeadmin_setting --> rbac_configuring: depends on kubeadmin
+        oauth_spoke_patching --> rbac_configuring: depends on oauth_spoke
+
+        insights_disabling --> day_one_complete
+        ssl_creating --> day_one_complete
+        rbac_configuring --> day_one_complete
+    }
+
+    state HANDOFF {
+        day_one_complete --> pending_handoff_verification: Slack notifies
+        pending_handoff_verification --> handoff_initiated: /cluster {id} ready
+        handoff_initiated --> credentials_created: PrivateBin paste
+        credentials_created --> welcome_email_sending
+        welcome_email_sending --> welcome_email_sent
+        welcome_email_sending --> welcome_email_failed
+        welcome_email_sent --> handoff_complete
+        welcome_email_failed --> failed
+        handoff_complete --> [*]
+    }
+
+    state DEPROVISION {
+        active --> deprovision_pr_opened
+        deprovision_pr_opened --> deprovision_pr_merged
+        deprovision_pr_merged --> cluster_deprovisioning
+        cluster_deprovisioning --> deprovisioned
+        deprovisioned --> [*]
+    }
+
+    failed --> [*]
 ```
 
 ---
@@ -1539,105 +1465,240 @@ Published by **scribe** to **worker-notification** after credentials are created
 
 ### Intake → Dispatch Saga
 
-```
-intake.raw (from n8n)
-  └─► worker-etl transforms
+```mermaid
+sequenceDiagram
+    autonumber
+    participant n8n
+    participant Q_RAW as intake.raw
+    participant ETL as worker-etl
+    participant Q_NORM as intake.normalized
+    participant Scribe
+    participant Q_PROV as lab.provision.*
+    participant Q_DISP as intake.dispatch.*
+    participant Messenger
 
-intake.normalized (from worker-etl)
-  └─► Scribe persists to DB [state: intake_stored]
-      └─► Policy evaluation:
+    n8n->>Q_RAW: publish raw payload
+    Q_RAW->>ETL: consume
+    ETL->>Q_NORM: publish normalized
+    Q_NORM->>Scribe: consume
+    Note over Scribe: Persist to DB<br/>[state: intake_stored]
 
-          STANDARD CONFIG:
-            ├─► lab.provision.generate-manifests   [state: manifests_generating]
-            └─► intake.dispatch.notify-fyi → messenger (Slack FYI, no buttons)
-                (fire-and-forget — provisioning does NOT wait)
-
-          NON-STANDARD:
-            └─► intake.dispatch.review-requested → messenger
-                (Slack: Provision / Review buttons)
-                [state: dispatch_review_requested]
-
-intake.dispatch.provision (Provision clicked)
-  └─► lab.provision.generate-manifests [state: manifests_generating]
-
-intake.dispatch.review (Review clicked)
-  └─► [state: pending_review]
-
-intake.dispatch.provision-after-review
-  └─► merge config_overrides → lab.provision.generate-manifests
-
-intake.dispatch.rejected
-  └─► [state: rejected] → notify requester
+    alt Standard Config
+        par Parallel dispatch
+            Scribe->>Q_PROV: publish generate-manifests<br/>[state: manifests_generating]
+            Scribe->>Q_DISP: publish notify-fyi
+        end
+        Q_DISP->>Messenger: consume (Slack FYI, no buttons)
+    else Non-Standard
+        Scribe->>Q_DISP: publish review-requested<br/>[state: dispatch_review_requested]
+        Q_DISP->>Messenger: consume (Slack: Provision/Review)
+        alt Provision clicked
+            Messenger->>Q_DISP: publish provision
+            Q_DISP->>Scribe: consume
+            Scribe->>Q_PROV: publish generate-manifests
+        else Review clicked
+            Messenger->>Q_DISP: publish review
+            Q_DISP->>Scribe: consume [state: pending_review]
+            alt Provision after review
+                Messenger->>Q_DISP: publish provision-after-review
+                Q_DISP->>Scribe: merge overrides
+                Scribe->>Q_PROV: publish generate-manifests
+            else Rejected
+                Messenger->>Q_DISP: publish rejected
+                Q_DISP->>Scribe: consume [state: rejected]
+            end
+        end
+    end
 ```
 
 ### Provisioning Saga
 
-```
-lab.provision.generate-manifests       → worker-prov builds manifests, opens PR
-lab.provision.manifests-complete       → Scribe [state: pr_opened]
-lab.provision.pr.checks-passed         → Scribe
-  ├─ auto_merge=true (default)         → auto-merge [state: pr_merged]
-  └─ auto_merge=false (override)       → [state: pending_approval, wait for human]
-lab.provision.pr.merged                → Scribe [state: cluster_installing]
-  (ArgoCD detects new subfolder, syncs, ACM creates ClusterDeployment)
-lab.provision.cluster-installing       → Scribe [state: cluster_installing, update timestamp]
-  (provision-watcher CronJob polling every minute)
-lab.provision.cluster-ready            → Scribe [state: active]
-  ├─► day-one saga
-  └─► notify.user.lab-ready
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Scribe
+    participant Q_PROV as lab.provision.*
+    participant WorkerProv as worker-provisioning
+    participant GitHub
+    participant ArgoCD
+    participant ACM
+    participant Watcher as provision-watcher
+    participant Q_NOTIFY as notify.*
+
+    Scribe->>Q_PROV: publish generate-manifests
+    Q_PROV->>WorkerProv: consume
+    WorkerProv->>GitHub: open PR
+    WorkerProv->>Q_PROV: publish manifests-complete
+    Q_PROV->>Scribe: consume [state: pr_opened]
+
+    GitHub->>Q_PROV: publish pr.checks-passed
+    Q_PROV->>Scribe: consume
+
+    alt auto_merge=true (default)
+        Scribe->>GitHub: auto-merge
+        GitHub->>Q_PROV: publish pr.merged
+    else auto_merge=false
+        Note over Scribe: [state: pending_approval]
+        GitHub->>Q_PROV: publish pr.merged (human approved)
+    end
+
+    Q_PROV->>Scribe: consume [state: cluster_installing]
+    Note over ArgoCD: Detects new subfolder, syncs
+    ArgoCD->>ACM: create ClusterDeployment
+
+    loop Every minute
+        Watcher->>ACM: poll ClusterProvision status
+    end
+
+    Watcher->>Q_PROV: publish cluster-installing
+    Q_PROV->>Scribe: consume (update timestamp)
+
+    Watcher->>Q_PROV: publish cluster-ready
+    Q_PROV->>Scribe: consume [state: active]
+
+    par Parallel
+        Scribe->>Q_PROV: trigger day-one saga
+        Scribe->>Q_NOTIFY: publish notify.user.lab-ready
+    end
 ```
 
 ### Day-One Saga
 
 All tasks execute as K8s Jobs on the hub cluster, created by worker-day-one.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Scribe
+    participant Q_D1 as lab.day1.*
+    participant WorkerD1 as worker-day-one
+    participant Jobs as K8s Jobs (hub)
+
+    Scribe->>Q_D1: publish orchestrate
+    Q_D1->>WorkerD1: consume
+
+    par No dependencies - parallel
+        WorkerD1->>Q_D1: publish insights.disable
+        Q_D1->>WorkerD1: consume
+        WorkerD1->>Jobs: create insights Job
+        Jobs-->>WorkerD1: complete
+        WorkerD1->>Q_D1: publish insights.complete
+    and
+        WorkerD1->>Q_D1: publish ssl.create
+        Q_D1->>WorkerD1: consume
+        WorkerD1->>Jobs: create ssl Job
+        Jobs-->>WorkerD1: complete
+        WorkerD1->>Q_D1: publish ssl.complete
+    and
+        WorkerD1->>Q_D1: publish oauth-hub.create
+        Q_D1->>WorkerD1: consume
+        WorkerD1->>Jobs: create oauth-hub Job
+        Jobs-->>WorkerD1: complete
+        WorkerD1->>Q_D1: publish oauth-hub.complete
+    and
+        WorkerD1->>Q_D1: publish kubeadmin.set
+        Q_D1->>WorkerD1: consume
+        WorkerD1->>Jobs: create kubeadmin Job
+        Jobs-->>WorkerD1: complete
+        WorkerD1->>Q_D1: publish kubeadmin.complete
+    end
+
+    Note over Q_D1,WorkerD1: Wait for oauth-hub.complete
+    WorkerD1->>Q_D1: publish oauth-spoke.patch
+    Q_D1->>WorkerD1: consume
+    WorkerD1->>Jobs: create oauth-spoke Job
+    Jobs-->>WorkerD1: complete
+    WorkerD1->>Q_D1: publish oauth-spoke.complete
+
+    Note over Q_D1,WorkerD1: Wait for kubeadmin + oauth-spoke
+    WorkerD1->>Q_D1: publish rbac.configure
+    Q_D1->>WorkerD1: consume
+    WorkerD1->>Jobs: create rbac Job
+    Jobs-->>WorkerD1: complete
+    WorkerD1->>Q_D1: publish rbac.complete
+
+    Q_D1->>Scribe: all *.complete received
+    Scribe->>Q_D1: publish lab.day1.complete
 ```
-lab.day1.insights.disable        (no deps)
-lab.day1.ssl.create              (no deps)
-lab.day1.oauth-hub.create        (no deps)
-lab.day1.kubeadmin.set           (no deps)
-  ↓ wait for oauth-hub.complete
-lab.day1.oauth-spoke.patch       (depends on: oauth-hub.complete)
-  ↓ wait for kubeadmin.complete AND oauth-spoke.complete
-lab.day1.rbac.configure          (depends on: kubeadmin.complete, oauth-spoke.complete)
-  ↓ all complete
-lab.day1.complete
-```
 
-### Handoff Saga [NEW]
+### Handoff Saga
 
-```
-lab.day1.complete (all day-one tasks succeeded)
-  └─► handoff.day1-complete-notify → messenger
-      (Slack: "Day-one complete for {cluster_name}. Verify and run /cluster {id} ready")
-      [state: pending_handoff_verification]
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Scribe
+    participant Q_H as handoff.*
+    participant Messenger
+    participant Slack
+    participant WorkerCred as worker-credentials
+    participant PrivateBin
+    participant WorkerNotif as worker-notification
+    participant Email
 
-handoff.cluster-ready (from messenger — /cluster {id} ready slash command)
-  └─► Scribe [state: handoff_initiated]
-      └─► handoff.credentials.create → worker-credentials
+    Note over Scribe: lab.day1.complete received
+    Scribe->>Q_H: publish day1-complete-notify<br/>[state: pending_handoff_verification]
+    Q_H->>Messenger: consume
+    Messenger->>Slack: "Day-one complete. Verify and run /cluster {id} ready"
 
-handoff.credentials.complete (from worker-credentials — PrivateBin paste created)
-  └─► Scribe [state: credentials_created]
-      └─► handoff.welcome-email.send → worker-notification
-          (email includes PrivateBin link, paste expiry, cluster details)
+    Slack->>Messenger: /cluster {id} ready
+    Messenger->>Q_H: publish cluster-ready
+    Q_H->>Scribe: consume [state: handoff_initiated]
 
-handoff.welcome-email.sent (from worker-notification)
-  └─► Scribe [state: handoff_complete]
-      └─► handoff.complete → messenger
-          (Slack: "Cluster {cluster_name} handoff complete — welcome email sent")
+    Scribe->>Q_H: publish credentials.create
+    Q_H->>WorkerCred: consume
+    WorkerCred->>PrivateBin: create paste (console URL, kubeadmin, kubeconfig)
+    PrivateBin-->>WorkerCred: paste URL
+    WorkerCred->>Q_H: publish credentials.complete
+    Q_H->>Scribe: consume [state: credentials_created]
+
+    Scribe->>Q_H: publish welcome-email.send
+    Q_H->>WorkerNotif: consume
+    WorkerNotif->>Email: send (PrivateBin link, expiry, cluster details)
+    Email-->>WorkerNotif: delivered
+    WorkerNotif->>Q_H: publish welcome-email.sent
+    Q_H->>Scribe: consume [state: handoff_complete]
+
+    Scribe->>Q_H: publish handoff.complete
+    Q_H->>Messenger: consume
+    Messenger->>Slack: "Cluster handoff complete - welcome email sent"
 ```
 
 ### Deprovision Saga
 
-```
-lab.deprovision.requested        → worker-deprov moves manifests to archive, opens PR
-lab.deprovision.archive-complete → Scribe [state: deprovision_pr_opened]
-lab.deprovision.pr.merged        → Scribe [state: cluster_deprovisioning]
-  (ArgoCD prunes, ACM ClusterDeprovision CR created)
-lab.deprovision.cluster-removed  → Scribe [state: deprovisioned]
-  (deprovision-watcher Job detects completion, does cleanup)
-  ├─► notify.user.lab-deprovisioned
-  └─► cleanup hub-side day-one resources (OAuth2Client, Certificate, etc.)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Portal
+    participant Scribe
+    participant Q_DEP as lab.deprovision.*
+    participant WorkerDep as worker-deprovision
+    participant GitHub
+    participant ArgoCD
+    participant ACM
+    participant Watcher as deprovision-watcher
+    participant Q_NOTIFY as notify.*
+
+    Portal->>Q_DEP: publish requested
+    Note over Portal: or Scribe (TTL expired)
+    Q_DEP->>WorkerDep: consume
+    WorkerDep->>GitHub: move manifests to archive, open PR
+    WorkerDep->>Q_DEP: publish archive-complete
+    Q_DEP->>Scribe: consume [state: deprovision_pr_opened]
+
+    GitHub->>Q_DEP: publish pr.merged
+    Q_DEP->>Scribe: consume [state: cluster_deprovisioning]
+
+    Note over ArgoCD: Prunes deleted resources
+    ArgoCD->>ACM: ClusterDeprovision CR created
+
+    Watcher->>ACM: detect completion
+    Watcher->>Q_DEP: publish cluster-removed
+    Q_DEP->>Scribe: consume [state: deprovisioned]
+
+    par Parallel cleanup
+        Scribe->>Q_NOTIFY: publish notify.user.lab-deprovisioned
+        Scribe->>Scribe: cleanup hub resources<br/>(OAuth2Client, Certificate, etc.)
+    end
 ```
 
 ---
