@@ -137,7 +137,7 @@ apiVersion: rabbitmq.com/v1beta1
 kind: Exchange
 metadata:
   name: ex-notify
-  namespace: opl-system
+  namespace: queue
   labels:
     app.kubernetes.io/part-of: opl
     opl.io/domain: notification
@@ -511,7 +511,7 @@ spec:
     x-dead-letter-exchange: opl.dlx
     x-dead-letter-routing-key: dlq.provision
   rabbitmqClusterReference:
-    name: opl-rabbitmq
+    name: queue
 
 ---
 apiVersion: rabbitmq.com/v1beta1
