@@ -1,15 +1,15 @@
 # State Capture via Exchanges/Queues
 
-This document explains how the OpenShift Partner Labs system captures workflow state using RabbitMQ exchanges and queues rather than relying solely on database storage.
+This document explains how the OpenShift Partner Labs system captures workflow state using message-broker exchanges and queues rather than relying solely on database storage.
 
 ## Sequence Diagram
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant GF as Google Form
-    participant GS as Google Sheet
-    participant n8n as n8n (Ingress)
+    participant GF as web-form
+    participant GS as spreadsheet
+    participant n8n as workflow-engine (Ingress)
     participant EX_I as opl.intake<br/>(Exchange)
     participant Q_RAW as intake.raw<br/>(Queue)
     participant ETL as worker-etl
@@ -24,7 +24,7 @@ sequenceDiagram
     participant D1Worker as worker-day-one
     participant EX_H as opl.handoff<br/>(Exchange)
     participant Q_H as handoff.*<br/>(Queues)
-    participant Messenger as Messenger<br/>(Slack)
+    participant Messenger as Messenger<br/>(team-chat)
     participant DLX as opl.dlx<br/>(Dead Letter)
 
     Note over GF,DLX: STATE IS THE MESSAGE - Each queue represents a state transition point
@@ -32,7 +32,7 @@ sequenceDiagram
     rect rgb(240, 248, 255)
         Note over GF,Q_NORM: INTAKE PIPELINE - State: intake_received -> intake_transforming -> intake_stored
         GF->>GS: Submit form
-        GS->>n8n: AppScript POST (on approval)
+        GS->>n8n: automation POST (on approval)
         n8n->>EX_I: publish(intake.raw)
         Note right of n8n: State embedded in message:<br/>correlation_id, event_type,<br/>timestamp, payload
         EX_I->>Q_RAW: route by key
@@ -95,7 +95,7 @@ sequenceDiagram
         Note over EX_H,Messenger: HANDOFF - State: pending_handoff -> credentials_created -> handoff_complete
         Scribe->>EX_H: publish(day1-complete-notify)
         EX_H->>Q_H: route
-        Q_H->>Messenger: consume -> Slack notification
+        Q_H->>Messenger: consume -> team-chat notification
         Messenger->>EX_H: publish(cluster-ready)
         Note right of Messenger: Human action (slash cmd)<br/>becomes queue message
         Scribe->>EX_H: publish(credentials.create)

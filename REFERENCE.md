@@ -9,19 +9,19 @@
 
 | Change | Why |
 |--------|-----|
-| Intake pipeline: Google Form → Sheet Tab 2 (custom headers) → AppScript → n8n → ETL | Portal is read-only status/management, not the submission mechanism |
-| **RabbitMQ** confirmed as message broker | Broker decision resolved |
-| **n8n** (self-hosted on hub cluster) as source-validated HTTP ingress | Trust boundary between AppScript and the broker |
-| Slack always notified: FYI (no buttons) for standard, Provision/Review for non-standard | Every request visible in Slack; auto-provision starts immediately in parallel |
+| Intake pipeline: web-form → spreadsheet Tab 2 (custom headers) → spreadsheet-automation → workflow-engine → ETL | Portal is read-only status/management, not the submission mechanism |
+| **message-broker** confirmed | Broker decision resolved |
+| **workflow-engine** (self-hosted on hub cluster) as source-validated HTTP ingress | Trust boundary between spreadsheet-automation and the broker |
+| team-chat always notified: FYI (no buttons) for standard, Provision/Review for non-standard | Every request visible in team-chat; auto-provision starts immediately in parallel |
 | PR **auto-merges by default** after checks pass | Human gate is at Slack dispatch, not the PR. PR gate is the exception. |
 | **Provision-watcher**: standalone CronJob on hub, polls for ClusterProvision ready state | Eliminates external credential gathering — runs hub-native with SA permissions |
-| **Deprovision-watcher**: ArgoCD-managed Job (part of app-of-apps), watches ClusterDeprovision | Already confirmed working |
+| **Deprovision-watcher**: gitops-controller-managed Job (part of app-of-apps), watches ClusterDeprovision | Already confirmed working |
 | **worker-day-one** redefined as a **Job orchestrator** on the hub cluster | Reads queue, creates/triggers K8s Jobs on hub. Jobs run hub-native — no external kubeconfig needed. |
 | Added `lab.day1.insights.disable` | Insights operator needs to be disabled as a day-one task |
-| **Handoff pipeline** after day-one: Slack notification → human verification → `/cluster {id} ready` → PrivateBin paste → welcome email | Cluster isn't "delivered" until credentials are securely shared via PrivateBin and welcome email is sent |
-| New components: **worker-credentials** (creates PrivateBin paste) and welcome email generation via **worker-notification** | Chain: credentials worker creates paste URL → passes to email worker for welcome email |
+| **Handoff pipeline** after day-one: team-chat notification → human verification → `/cluster {id} ready` → secure-paste → welcome email | Cluster isn't "delivered" until credentials are securely shared via secure-paste and welcome email is sent |
+| New components: **worker-credentials** (creates secure-paste) and welcome email generation via **worker-notification** | Chain: credentials worker creates paste URL → passes to email worker for welcome email |
 | New state: `handoff_complete` | Final terminal state for a successfully delivered cluster |
-| Messenger bot handles `/cluster {id} ready` slash command directly | Consistent with messenger owning all Slack interactions |
+| Messenger bot handles `/cluster {id} ready` slash command directly | Consistent with messenger owning all team-chat interactions |
 
 ---
 
@@ -30,9 +30,9 @@
 ```mermaid
 flowchart TB
     subgraph INTAKE["INTAKE PIPELINE"]
-        GF[Google Form] --> GS[Google Sheet<br/>Tab 1: raw responses]
+        GF[web-form] --> GS[spreadsheet<br/>Tab 1: raw responses]
         GS -->|"formula mirrors to Tab 2<br/>(custom headers)"| GS
-        GS -->|"AppScript POST<br/>(on approval)"| n8n[n8n<br/>source auth]
+        GS -->|"automation POST<br/>(on approval)"| n8n[workflow-engine<br/>source auth]
         n8n -->|publish| Q_RAW[(intake.raw)]
         Q_RAW --> ETL[worker-etl<br/>ensures keys fit schema]
         ETL -->|publish| Q_NORM[(intake.normalized)]
@@ -41,8 +41,8 @@ flowchart TB
     subgraph CORE["CORE SYSTEM"]
         Q_NORM --> Scribe[scribe<br/>persists to DB<br/>evaluates policy]
         Scribe -->|standard config| Provision[Start Provisioning]
-        Scribe -->|standard config| SlackFYI[Slack FYI<br/>no buttons]
-        Scribe -->|non-standard| SlackInt[Slack Interactive<br/>Provision / Review]
+        Scribe -->|standard config| SlackFYI[team-chat FYI<br/>no buttons]
+        Scribe -->|non-standard| SlackInt[team-chat Interactive<br/>Provision / Review]
         SlackInt -->|Provision clicked| Provision
         SlackInt -->|Review clicked| PendingReview[pending_review]
         PendingReview -->|Provision after review| Provision
@@ -52,8 +52,8 @@ flowchart TB
     subgraph PROV["PROVISIONING PIPELINE"]
         Provision -->|publish| Q_GEN[(lab.provision<br/>.generate-manifests)]
         Q_GEN --> WorkerProv[worker-provisioning<br/>builds manifests<br/>opens PR]
-        WorkerProv --> GitHub[GitHub repo checks<br/>validate manifests<br/>auto-merge or wait]
-        GitHub --> ArgoCD[ArgoCD app-of-apps<br/>syncs subfolder<br/>ACM creates ClusterDeployment]
+        WorkerProv --> GitHub[git-platform checks<br/>validate manifests<br/>auto-merge or wait]
+        GitHub --> ArgoCD[gitops-controller app-of-apps<br/>syncs subfolder<br/>cluster-lifecycle-manager creates ClusterDeployment]
         ArgoCD --> ProvWatch[provision-watcher<br/>CronJob polls status<br/>hub-native]
         ProvWatch -->|publish cluster-ready| Q_READY[(lab.provision<br/>.cluster-ready)]
     end
@@ -74,21 +74,21 @@ flowchart TB
 
 | Component | Type | Runs On | Description |
 |-----------|------|---------|-------------|
-| **n8n** | Self-hosted workflow engine | Hub cluster | Receives AppScript POST, validates source is trusted, publishes raw payload to RabbitMQ. Zero transformation. |
-| **worker-etl** | RabbitMQ consumer | Hub cluster | Transforms raw Tab 2 JSON (custom headers) into canonical schema. Ensures keys fit what Scribe expects. |
+| **workflow-engine** | Self-hosted workflow automation | Hub cluster | Receives spreadsheet-automation POST, validates source is trusted, publishes raw payload to message-broker. Zero transformation. |
+| **worker-etl** | message-broker consumer | Hub cluster | Transforms raw Tab 2 JSON (custom headers) into canonical schema. Ensures keys fit what Scribe expects. |
 | **scribe** | Saga orchestrator | Hub cluster | Persists to DB, evaluates auto-provision policy, orchestrates all downstream workflows. Single writer. |
-| **messenger** | Slack bot | Hub cluster | Posts FYI messages (standard) or interactive Provision/Review messages (non-standard). Handles `/cluster {id} ready` slash command. Publishes dispatch and handoff decisions back to RabbitMQ. |
-| **worker-provisioning** | RabbitMQ consumer | Hub cluster | Builds ACM/ArgoCD manifests from message data, opens PR in gitops repo. |
-| **worker-deprovision** | RabbitMQ consumer | Hub cluster | Moves cluster manifests to archive directory, opens PR. |
-| **provision-watcher** | Standalone CronJob | Hub cluster | Polls every minute for Hive/ACM ClusterProvision status. Publishes `cluster-ready` or `cluster-failed` to RabbitMQ. Runs hub-native with SA permissions — no external credential gathering. |
-| **deprovision-watcher** | ArgoCD-managed Job | Hub cluster | Part of app-of-apps setup. Watches for ClusterDeprovision job completion, does cleanup. Publishes `cluster-removed` to RabbitMQ. Confirmed working. |
-| **worker-day-one** | Job orchestrator (RabbitMQ consumer) | Hub cluster | Reads day-one sub-task messages from RabbitMQ. Creates/triggers K8s Jobs on the hub cluster for each task. Jobs execute with hub SA permissions — no external kubeconfig needed. Watches Job completion, reports status back to RabbitMQ. |
-| **worker-day-two** | RabbitMQ consumer | Hub cluster | Day-two operations. Same Job orchestrator pattern as worker-day-one. |
-| **worker-credentials** | RabbitMQ consumer | Hub cluster | Creates password-protected PrivateBin pastes containing cluster credentials (console URL, kubeadmin password, kubeconfig). Publishes paste URL to queue for email worker. Hub-native — reads credentials from hub secrets. |
-| **worker-notification** | RabbitMQ consumer | Hub cluster | Email and basic alerts. Generates and sends welcome emails (with PrivateBin link) and lifecycle notifications. |
+| **messenger** | team-chat bot | Hub cluster | Posts FYI messages (standard) or interactive Provision/Review messages (non-standard). Handles `/cluster {id} ready` slash command. Publishes dispatch and handoff decisions back to message-broker. |
+| **worker-provisioning** | message-broker consumer | Hub cluster | Builds cluster-lifecycle-manager/gitops-controller manifests from message data, opens PR in gitops repo. |
+| **worker-deprovision** | message-broker consumer | Hub cluster | Moves cluster manifests to archive directory, opens PR. |
+| **provision-watcher** | Standalone CronJob | Hub cluster | Polls every minute for cluster-lifecycle-manager ClusterProvision status. Publishes `cluster-ready` or `cluster-failed` to message-broker. Runs hub-native with SA permissions — no external credential gathering. |
+| **deprovision-watcher** | gitops-controller-managed Job | Hub cluster | Part of app-of-apps setup. Watches for ClusterDeprovision job completion, does cleanup. Publishes `cluster-removed` to message-broker. Confirmed working. |
+| **worker-day-one** | Job orchestrator (message-broker consumer) | Hub cluster | Reads day-one sub-task messages from message-broker. Creates/triggers K8s Jobs on the hub cluster for each task. Jobs execute with hub SA permissions — no external kubeconfig needed. Watches Job completion, reports status back to message-broker. |
+| **worker-day-two** | message-broker consumer | Hub cluster | Day-two operations. Same Job orchestrator pattern as worker-day-one. |
+| **worker-credentials** | message-broker consumer | Hub cluster | Creates password-protected secure-paste entries containing cluster credentials (console URL, kubeadmin password, kubeconfig). Publishes paste URL to queue for email worker. Hub-native — reads credentials from hub secrets. |
+| **worker-notification** | message-broker consumer | Hub cluster | Email and basic alerts. Generates and sends welcome emails (with secure-paste link) and lifecycle notifications. |
 | **portal** | Web app (read-only DB) | Hub cluster | Status dashboard, lab management UI. Does NOT handle request intake. |
 
-> **Why hub-native execution matters:** The provision-watcher, deprovision-watcher, and day-one Jobs all run on the hub cluster with service account permissions. This eliminates the need to gather kubeconfigs, manage external credentials, or reach into clusters from outside. The hub SA already has access to ACM/Hive CRs, spoke cluster secrets, and cert-manager resources.
+> **Why hub-native execution matters:** The provision-watcher, deprovision-watcher, and day-one Jobs all run on the hub cluster with service account permissions. This eliminates the need to gather kubeconfigs, manage external credentials, or reach into clusters from outside. The hub SA already has access to cluster-lifecycle-manager CRs, spoke cluster secrets, and certificate-manager resources.
 
 ---
 
@@ -96,7 +96,7 @@ flowchart TB
 
 ```mermaid
 stateDiagram-v2
-    [*] --> intake_received: n8n got payload
+    [*] --> intake_received: workflow-engine got payload
 
     state INTAKE {
         intake_received --> intake_transforming: ETL processing
@@ -104,8 +104,8 @@ stateDiagram-v2
     }
 
     state DISPATCH {
-        intake_stored --> manifests_generating: standard config<br/>(Slack FYI parallel)
-        intake_stored --> dispatch_review_requested: non-standard<br/>(Slack interactive)
+        intake_stored --> manifests_generating: standard config<br/>(team-chat FYI parallel)
+        intake_stored --> dispatch_review_requested: non-standard<br/>(team-chat interactive)
         dispatch_review_requested --> manifests_generating: Provision clicked
         dispatch_review_requested --> pending_review: Review clicked
         pending_review --> manifests_generating: Provision after review
@@ -122,7 +122,7 @@ stateDiagram-v2
         pr_checks_passed --> pending_approval: override
         pending_approval --> pr_merged: human approves
         pr_checks_failed --> failed
-        pr_merged --> cluster_installing: ArgoCD synced
+        pr_merged --> cluster_installing: gitops-controller synced
         cluster_installing --> cluster_ready
         cluster_installing --> cluster_failed
         cluster_failed --> failed
@@ -145,9 +145,9 @@ stateDiagram-v2
     }
 
     state HANDOFF {
-        day_one_complete --> pending_handoff_verification: Slack notifies
+        day_one_complete --> pending_handoff_verification: team-chat notifies
         pending_handoff_verification --> handoff_initiated: /cluster {id} ready
-        handoff_initiated --> credentials_created: PrivateBin paste
+        handoff_initiated --> credentials_created: secure-paste
         credentials_created --> welcome_email_sending
         welcome_email_sending --> welcome_email_sent
         welcome_email_sending --> welcome_email_failed
@@ -176,7 +176,7 @@ stateDiagram-v2
 
 | Queue Name                              | Publisher      | Consumer(s)  | Purpose |
 |-----------------------------------------|----------------|--------------|---------|
-| `intake.raw`                            | n8n            | worker-etl   | Raw Tab 2 JSON from AppScript — custom headers, no transformation |
+| `intake.raw`                            | workflow-engine | worker-etl   | Raw Tab 2 JSON from spreadsheet-automation — custom headers, no transformation |
 | `intake.raw.failed`                     | worker-etl     | scribe       | ETL transformation failed |
 | `intake.normalized`                     | worker-etl     | scribe       | Transformed payload matching canonical schema |
 
@@ -184,12 +184,12 @@ stateDiagram-v2
 
 | Queue Name                              | Publisher      | Consumer(s)  | Purpose |
 |-----------------------------------------|----------------|--------------|---------|
-| `intake.dispatch.notify-fyi`            | scribe         | messenger    | Standard config — Slack FYI, no buttons, fire-and-forget |
-| `intake.dispatch.review-requested`      | scribe         | messenger    | Non-standard — Slack interactive with Provision/Review buttons |
-| `intake.dispatch.provision`             | messenger      | scribe       | Slack: Provision button clicked |
-| `intake.dispatch.review`                | messenger      | scribe       | Slack: Review button clicked |
-| `intake.dispatch.provision-after-review`| messenger      | scribe       | Slack: Provision after prior Review |
-| `intake.dispatch.rejected`              | messenger      | scribe       | Slack: Request rejected during review |
+| `intake.dispatch.notify-fyi`            | scribe         | messenger    | Standard config — team-chat FYI, no buttons, fire-and-forget |
+| `intake.dispatch.review-requested`      | scribe         | messenger    | Non-standard — team-chat interactive with Provision/Review buttons |
+| `intake.dispatch.provision`             | messenger      | scribe       | team-chat: Provision button clicked |
+| `intake.dispatch.review`                | messenger      | scribe       | team-chat: Review button clicked |
+| `intake.dispatch.provision-after-review`| messenger      | scribe       | team-chat: Provision after prior Review |
+| `intake.dispatch.rejected`              | messenger      | scribe       | team-chat: Request rejected during review |
 
 ### Provisioning
 
@@ -201,8 +201,8 @@ stateDiagram-v2
 | `lab.provision.pr.checks-passed`        | CI webhook / prov    | scribe      | All PR checks passed |
 | `lab.provision.pr.checks-failed`        | CI webhook / prov    | scribe      | PR checks failed |
 | `lab.provision.pr.approval-required`    | scribe               | notif       | PR override: needs human approval (non-default) |
-| `lab.provision.pr.merged`               | GH webhook / prov    | scribe      | PR merged (auto or manual) |
-| `lab.provision.cluster-installing`      | provision-watcher    | scribe      | ACM began cluster installation |
+| `lab.provision.pr.merged`               | git-platform webhook / prov | scribe | PR merged (auto or manual) |
+| `lab.provision.cluster-installing`      | provision-watcher    | scribe      | cluster-lifecycle-manager began cluster installation |
 | `lab.provision.cluster-ready`           | provision-watcher    | scribe      | Cluster ready, all default operators settled |
 | `lab.provision.cluster-failed`          | provision-watcher    | scribe      | Cluster install failed |
 
@@ -212,7 +212,7 @@ stateDiagram-v2
 |-----------------------------------------|----------------------|---------------|---------|
 | `lab.deprovision.requested`             | portal / scribe      | worker-deprov | Start deprovision workflow |
 | `lab.deprovision.archive-complete`      | worker-deprov        | scribe        | Manifests moved to archive, PR opened |
-| `lab.deprovision.pr.merged`             | GH webhook / deprov  | scribe        | Archive PR merged |
+| `lab.deprovision.pr.merged`             | git-platform webhook / deprov | scribe | Archive PR merged |
 | `lab.deprovision.cluster-removing`      | deprovision-watcher  | scribe        | ClusterDeprovision job running |
 | `lab.deprovision.cluster-removed`       | deprovision-watcher  | scribe        | Deprovision complete, cleanup done |
 | `lab.deprovision.failed`                | deprovision-watcher  | scribe        | Deprovision failed |
@@ -247,12 +247,12 @@ stateDiagram-v2
 
 | Queue Name                              | Publisher         | Consumer(s)        | Purpose |
 |-----------------------------------------|-------------------|--------------------|---------|
-| `handoff.day1-complete-notify`          | scribe            | messenger          | Notify Slack that day-one is done — human can verify cluster |
+| `handoff.day1-complete-notify`          | scribe            | messenger          | Notify team-chat that day-one is done — human can verify cluster |
 | `handoff.cluster-ready`                 | messenger         | scribe             | `/cluster {id} ready` slash command — human confirmed cluster is ready |
-| `handoff.credentials.create`            | scribe            | worker-credentials | Create PrivateBin paste with cluster credentials |
-| `handoff.credentials.complete`          | worker-credentials| scribe             | PrivateBin paste created — includes paste URL |
-| `handoff.credentials.failed`            | worker-credentials| scribe             | PrivateBin paste creation failed |
-| `handoff.welcome-email.send`            | scribe            | worker-notification| Send welcome email with PrivateBin link |
+| `handoff.credentials.create`            | scribe            | worker-credentials | Create secure-paste with cluster credentials |
+| `handoff.credentials.complete`          | worker-credentials| scribe             | secure-paste created — includes paste URL |
+| `handoff.credentials.failed`            | worker-credentials| scribe             | secure-paste creation failed |
+| `handoff.welcome-email.send`            | scribe            | worker-notification| Send welcome email with secure-paste link |
 | `handoff.welcome-email.sent`            | worker-notification| scribe            | Welcome email delivered |
 | `handoff.welcome-email.failed`          | worker-notification| scribe            | Welcome email delivery failed |
 | `handoff.complete`                      | scribe            | scribe, messenger  | Handoff complete — cluster delivered |
@@ -313,7 +313,7 @@ stateDiagram-v2
     "timestamp": { "type": "string", "format": "date-time" },
     "source": {
       "type": "string",
-      "examples": ["n8n", "worker-etl", "scribe", "messenger", "worker-provisioning", "provision-watcher", "deprovision-watcher", "worker-day-one", "worker-credentials", "worker-notification"]
+      "examples": ["workflow-engine", "worker-etl", "scribe", "messenger", "worker-provisioning", "provision-watcher", "deprovision-watcher", "worker-day-one", "worker-credentials", "worker-notification"]
     },
     "correlation_id": { "type": "string", "format": "uuid" },
     "causation_id": { "type": "string", "format": "uuid" },
@@ -330,7 +330,7 @@ stateDiagram-v2
 
 #### `intake.raw`
 
-Published by **n8n** after source validation. Tab 2 row (custom headers) exactly as AppScript sent it.
+Published by **workflow-engine** after source validation. Tab 2 row (custom headers) exactly as spreadsheet-automation sent it.
 
 ```json
 {
@@ -342,7 +342,7 @@ Published by **n8n** after source validation. Tab 2 row (custom headers) exactly
   "properties": {
     "form_response_id": {
       "type": "string",
-      "description": "Google Forms response ID — deduplication key"
+      "description": "web-form response ID — deduplication key"
     },
     "sheet_name": { "type": "string" },
     "sheet_row_number": { "type": "integer" },
@@ -466,7 +466,7 @@ Published by **n8n** after source validation. Tab 2 row (custom headers) exactly
 
 #### `intake.dispatch.notify-fyi`
 
-Informational Slack message for auto-provisioned standard configs. No buttons. Provisioning already started.
+Informational team-chat message for auto-provisioned standard configs. No buttons. Provisioning already started.
 
 ```json
 {
@@ -496,7 +496,7 @@ Informational Slack message for auto-provisioned standard configs. No buttons. P
         "ttl_hours": { "type": "integer" }
       }
     },
-    "slack_channel": { "type": "string" },
+    "chat_channel": { "type": "string" },
     "auto_provisioned": { "type": "boolean", "const": true }
   }
 }
@@ -504,7 +504,7 @@ Informational Slack message for auto-provisioned standard configs. No buttons. P
 
 #### `intake.dispatch.review-requested`
 
-Slack interactive message with Provision/Review buttons. Provisioning blocked until button click.
+Team-chat interactive message with Provision/Review buttons. Provisioning blocked until button click.
 
 ```json
 {
@@ -540,7 +540,7 @@ Slack interactive message with Provision/Review buttons. Provisioning blocked un
       "items": { "type": "string" },
       "examples": [["unknown_instance_type", "has_special_requests", "exceeds_worker_count_limit"]]
     },
-    "slack_channel": { "type": "string" },
+    "chat_channel": { "type": "string" },
     "auto_provisioned": { "type": "boolean", "const": false }
   }
 }
@@ -559,14 +559,14 @@ Slack interactive message with Provision/Review buttons. Provisioning blocked un
     "cluster_name": { "type": "string" },
     "dispatched_by": {
       "type": "object",
-      "required": ["slack_user_id", "slack_username"],
+      "required": ["chat_user_id", "chat_username"],
       "properties": {
-        "slack_user_id": { "type": "string" },
-        "slack_username": { "type": "string" },
+        "chat_user_id": { "type": "string" },
+        "chat_username": { "type": "string" },
         "email": { "type": "string", "format": "email" }
       }
     },
-    "slack_message_ts": { "type": "string" }
+    "chat_message_ts": { "type": "string" }
   }
 }
 ```
@@ -584,14 +584,14 @@ Slack interactive message with Provision/Review buttons. Provisioning blocked un
     "cluster_name": { "type": "string" },
     "reviewed_by": {
       "type": "object",
-      "required": ["slack_user_id", "slack_username"],
+      "required": ["chat_user_id", "chat_username"],
       "properties": {
-        "slack_user_id": { "type": "string" },
-        "slack_username": { "type": "string" },
+        "chat_user_id": { "type": "string" },
+        "chat_username": { "type": "string" },
         "email": { "type": "string", "format": "email" }
       }
     },
-    "slack_message_ts": { "type": "string" },
+    "chat_message_ts": { "type": "string" },
     "review_notes": { "type": "string" }
   }
 }
@@ -610,14 +610,14 @@ Slack interactive message with Provision/Review buttons. Provisioning blocked un
     "cluster_name": { "type": "string" },
     "dispatched_by": {
       "type": "object",
-      "required": ["slack_user_id", "slack_username"],
+      "required": ["chat_user_id", "chat_username"],
       "properties": {
-        "slack_user_id": { "type": "string" },
-        "slack_username": { "type": "string" },
+        "chat_user_id": { "type": "string" },
+        "chat_username": { "type": "string" },
         "email": { "type": "string", "format": "email" }
       }
     },
-    "slack_message_ts": { "type": "string" },
+    "chat_message_ts": { "type": "string" },
     "config_overrides": {
       "type": "object",
       "additionalProperties": true,
@@ -640,15 +640,15 @@ Slack interactive message with Provision/Review buttons. Provisioning blocked un
     "cluster_name": { "type": "string" },
     "rejected_by": {
       "type": "object",
-      "required": ["slack_user_id", "slack_username"],
+      "required": ["chat_user_id", "chat_username"],
       "properties": {
-        "slack_user_id": { "type": "string" },
-        "slack_username": { "type": "string" },
+        "chat_user_id": { "type": "string" },
+        "chat_username": { "type": "string" },
         "email": { "type": "string", "format": "email" }
       }
     },
     "reason": { "type": "string" },
-    "slack_message_ts": { "type": "string" }
+    "chat_message_ts": { "type": "string" }
   }
 }
 ```
@@ -780,7 +780,7 @@ Slack interactive message with Provision/Review buttons. Provisioning blocked un
     "merge_commit_sha": { "type": "string" },
     "merged_by": {
       "type": "string",
-      "description": "GitHub username or 'auto-merge'"
+      "description": "git-platform username or 'auto-merge'"
     }
   }
 }
@@ -800,8 +800,8 @@ Published by **provision-watcher** (standalone CronJob on hub).
     "cluster_name": { "type": "string" },
     "cluster_deployment_name": { "type": "string" },
     "cluster_deployment_namespace": { "type": "string" },
-    "argocd_app_name": { "type": "string" },
-    "argocd_sync_status": { "type": "string", "enum": ["Synced", "OutOfSync", "Unknown"] }
+    "gitops_app_name": { "type": "string" },
+    "gitops_sync_status": { "type": "string", "enum": ["Synced", "OutOfSync", "Unknown"] }
   }
 }
 ```
@@ -942,7 +942,7 @@ Published by **deprovision-watcher** (ArgoCD-managed Job on hub).
 
 ### Day-One Payloads
 
-> **Execution model:** worker-day-one reads each sub-task message from RabbitMQ, creates a K8s Job on the hub cluster to perform the work, watches the Job to completion, and publishes the result back to RabbitMQ. All Jobs run hub-native with service account permissions.
+> **Execution model:** worker-day-one reads each sub-task message from message-broker, creates a K8s Job on the hub cluster to perform the work, watches the Job to completion, and publishes the result back to message-broker. All Jobs run hub-native with service account permissions.
 
 #### `lab.day1.insights.disable` [NEW]
 
@@ -1096,7 +1096,7 @@ Job derives: `dnsNames`, `secretName`.
 
 #### `handoff.day1-complete-notify`
 
-Published by **scribe** when all day-one sub-tasks succeed. Triggers Slack message informing team that cluster is ready for verification.
+Published by **scribe** when all day-one sub-tasks succeed. Triggers team-chat message informing team that cluster is ready for verification.
 
 ```json
 {
@@ -1119,7 +1119,7 @@ Published by **scribe** when all day-one sub-tasks succeed. Triggers Slack messa
     },
     "day1_summary": {
       "type": "object",
-      "description": "Summary of completed day-one tasks for the Slack message",
+      "description": "Summary of completed day-one tasks for the team-chat message",
       "properties": {
         "tasks_completed": { "type": "integer" },
         "total_duration_ms": { "type": "integer" },
@@ -1136,14 +1136,14 @@ Published by **scribe** when all day-one sub-tasks succeed. Triggers Slack messa
         }
       }
     },
-    "slack_channel": { "type": "string" }
+    "chat_channel": { "type": "string" }
   }
 }
 ```
 
 #### `handoff.cluster-ready`
 
-Published by **messenger** when someone runs `/cluster {id} ready` in Slack.
+Published by **messenger** when someone runs `/cluster {id} ready` in team-chat.
 
 ```json
 {
@@ -1156,22 +1156,22 @@ Published by **messenger** when someone runs `/cluster {id} ready` in Slack.
     "cluster_name": { "type": "string" },
     "verified_by": {
       "type": "object",
-      "required": ["slack_user_id", "slack_username"],
+      "required": ["chat_user_id", "chat_username"],
       "properties": {
-        "slack_user_id": { "type": "string" },
-        "slack_username": { "type": "string" },
+        "chat_user_id": { "type": "string" },
+        "chat_username": { "type": "string" },
         "email": { "type": "string", "format": "email" }
       },
       "description": "Who ran the slash command — audit trail"
     },
-    "slack_message_ts": { "type": "string" }
+    "chat_message_ts": { "type": "string" }
   }
 }
 ```
 
 #### `handoff.credentials.create`
 
-Published by **scribe** to **worker-credentials**. Command to create a PrivateBin paste with cluster credentials.
+Published by **scribe** to **worker-credentials**. Command to create a secure-paste with cluster credentials.
 
 ```json
 {
@@ -1193,15 +1193,15 @@ Published by **scribe** to **worker-credentials**. Command to create a PrivateBi
       "type": "string",
       "description": "K8s secret name on hub containing the kubeconfig (reference, NOT the value)"
     },
-    "privatebin_url": {
+    "secure_paste_url": {
       "type": "string",
       "format": "uri",
-      "description": "Base URL of the self-hosted PrivateBin instance"
+      "description": "Base URL of the self-hosted secure-paste instance"
     },
     "paste_expiry": {
       "type": "string",
       "default": "1week",
-      "description": "PrivateBin paste expiration",
+      "description": "secure-paste expiration",
       "enum": ["5min", "10min", "1hour", "1day", "1week", "1month", "never"]
     },
     "paste_burn_after_reading": {
@@ -1213,11 +1213,11 @@ Published by **scribe** to **worker-credentials**. Command to create a PrivateBi
 }
 ```
 
-> **Secrets stay on the hub.** The message carries secret *references* (K8s secret names), not values. worker-credentials runs on the hub cluster, reads the actual secrets using its SA, assembles the paste content, and pushes it to PrivateBin. The paste password is generated at execution time and included in the URL fragment (client-side decryption — PrivateBin's standard model).
+> **Secrets stay on the hub.** The message carries secret *references* (K8s secret names), not values. worker-credentials runs on the hub cluster, reads the actual secrets using its SA, assembles the paste content, and pushes it to secure-paste. The paste password is generated at execution time and included in the URL fragment (client-side decryption — secure-paste's standard model).
 
 #### `handoff.credentials.complete`
 
-Published by **worker-credentials** after PrivateBin paste is created.
+Published by **worker-credentials** after secure-paste is created.
 
 ```json
 {
@@ -1231,11 +1231,11 @@ Published by **worker-credentials** after PrivateBin paste is created.
     "paste_url": {
       "type": "string",
       "format": "uri",
-      "description": "Full PrivateBin URL including password fragment — this IS the sensitive value"
+      "description": "Full secure-paste URL including password fragment — this IS the sensitive value"
     },
     "paste_id": {
       "type": "string",
-      "description": "PrivateBin paste ID for reference/deletion"
+      "description": "secure-paste ID for reference/deletion"
     },
     "expires_at": {
       "type": "string",
@@ -1246,7 +1246,7 @@ Published by **worker-credentials** after PrivateBin paste is created.
 }
 ```
 
-> **Security note:** `paste_url` includes the decryption key in the URL fragment. This value transits the broker exactly once — from worker-credentials to Scribe, then Scribe passes it to the email worker. Consider whether your RabbitMQ transport is encrypted (TLS) and whether message persistence to disk is acceptable for this payload. If not, the credentials worker could publish the welcome email directly, bypassing Scribe for this one hop.
+> **Security note:** `paste_url` includes the decryption key in the URL fragment. This value transits the broker exactly once — from worker-credentials to Scribe, then Scribe passes it to the email worker. Consider whether your message-broker transport is encrypted (TLS) and whether message persistence to disk is acceptable for this payload. If not, the credentials worker could publish the welcome email directly, bypassing Scribe for this one hop.
 
 #### `handoff.credentials.failed`
 
@@ -1265,7 +1265,7 @@ Published by **worker-credentials** after PrivateBin paste is created.
       "properties": {
         "code": {
           "type": "string",
-          "examples": ["PRIVATEBIN_API_ERROR", "SECRET_NOT_FOUND", "KUBECONFIG_MISSING"]
+          "examples": ["SECURE_PASTE_API_ERROR", "SECRET_NOT_FOUND", "KUBECONFIG_MISSING"]
         },
         "message": { "type": "string" },
         "details": { "type": "object" }
@@ -1306,7 +1306,7 @@ Published by **scribe** to **worker-notification** after credentials are created
     "paste_url": {
       "type": "string",
       "format": "uri",
-      "description": "PrivateBin URL with credentials — included in the email body"
+      "description": "secure-paste URL with credentials — included in the email body"
     },
     "paste_expires_at": {
       "type": "string",
@@ -1468,7 +1468,7 @@ Published by **scribe** to **worker-notification** after credentials are created
 ```mermaid
 sequenceDiagram
     autonumber
-    participant n8n
+    participant WFE as workflow-engine
     participant Q_RAW as intake.raw
     participant ETL as worker-etl
     participant Q_NORM as intake.normalized
@@ -1477,7 +1477,7 @@ sequenceDiagram
     participant Q_DISP as intake.dispatch.*
     participant Messenger
 
-    n8n->>Q_RAW: publish raw payload
+    WFE->>Q_RAW: publish raw payload
     Q_RAW->>ETL: consume
     ETL->>Q_NORM: publish normalized
     Q_NORM->>Scribe: consume
@@ -1488,10 +1488,10 @@ sequenceDiagram
             Scribe->>Q_PROV: publish generate-manifests<br/>[state: manifests_generating]
             Scribe->>Q_DISP: publish notify-fyi
         end
-        Q_DISP->>Messenger: consume (Slack FYI, no buttons)
+        Q_DISP->>Messenger: consume (team-chat FYI, no buttons)
     else Non-Standard
         Scribe->>Q_DISP: publish review-requested<br/>[state: dispatch_review_requested]
-        Q_DISP->>Messenger: consume (Slack: Provision/Review)
+        Q_DISP->>Messenger: consume (team-chat: Provision/Review)
         alt Provision clicked
             Messenger->>Q_DISP: publish provision
             Q_DISP->>Scribe: consume
@@ -1519,35 +1519,35 @@ sequenceDiagram
     participant Scribe
     participant Q_PROV as lab.provision.*
     participant WorkerProv as worker-provisioning
-    participant GitHub
-    participant ArgoCD
-    participant ACM
+    participant GitPlatform as git-platform
+    participant GitOps as gitops-controller
+    participant CLM as cluster-lifecycle-manager
     participant Watcher as provision-watcher
     participant Q_NOTIFY as notify.*
 
     Scribe->>Q_PROV: publish generate-manifests
     Q_PROV->>WorkerProv: consume
-    WorkerProv->>GitHub: open PR
+    WorkerProv->>GitPlatform: open PR
     WorkerProv->>Q_PROV: publish manifests-complete
     Q_PROV->>Scribe: consume [state: pr_opened]
 
-    GitHub->>Q_PROV: publish pr.checks-passed
+    GitPlatform->>Q_PROV: publish pr.checks-passed
     Q_PROV->>Scribe: consume
 
     alt auto_merge=true (default)
-        Scribe->>GitHub: auto-merge
-        GitHub->>Q_PROV: publish pr.merged
+        Scribe->>GitPlatform: auto-merge
+        GitPlatform->>Q_PROV: publish pr.merged
     else auto_merge=false
         Note over Scribe: [state: pending_approval]
-        GitHub->>Q_PROV: publish pr.merged (human approved)
+        GitPlatform->>Q_PROV: publish pr.merged (human approved)
     end
 
     Q_PROV->>Scribe: consume [state: cluster_installing]
-    Note over ArgoCD: Detects new subfolder, syncs
-    ArgoCD->>ACM: create ClusterDeployment
+    Note over GitOps: Detects new subfolder, syncs
+    GitOps->>CLM: create ClusterDeployment
 
     loop Every minute
-        Watcher->>ACM: poll ClusterProvision status
+        Watcher->>CLM: poll ClusterProvision status
     end
 
     Watcher->>Q_PROV: publish cluster-installing
@@ -1629,38 +1629,38 @@ sequenceDiagram
     participant Scribe
     participant Q_H as handoff.*
     participant Messenger
-    participant Slack
+    participant TeamChat as team-chat
     participant WorkerCred as worker-credentials
-    participant PrivateBin
+    participant SecurePaste as secure-paste
     participant WorkerNotif as worker-notification
     participant Email
 
     Note over Scribe: lab.day1.complete received
     Scribe->>Q_H: publish day1-complete-notify<br/>[state: pending_handoff_verification]
     Q_H->>Messenger: consume
-    Messenger->>Slack: "Day-one complete. Verify and run /cluster {id} ready"
+    Messenger->>TeamChat: "Day-one complete. Verify and run /cluster {id} ready"
 
-    Slack->>Messenger: /cluster {id} ready
+    TeamChat->>Messenger: /cluster {id} ready
     Messenger->>Q_H: publish cluster-ready
     Q_H->>Scribe: consume [state: handoff_initiated]
 
     Scribe->>Q_H: publish credentials.create
     Q_H->>WorkerCred: consume
-    WorkerCred->>PrivateBin: create paste (console URL, kubeadmin, kubeconfig)
-    PrivateBin-->>WorkerCred: paste URL
+    WorkerCred->>SecurePaste: create paste (console URL, kubeadmin, kubeconfig)
+    SecurePaste-->>WorkerCred: paste URL
     WorkerCred->>Q_H: publish credentials.complete
     Q_H->>Scribe: consume [state: credentials_created]
 
     Scribe->>Q_H: publish welcome-email.send
     Q_H->>WorkerNotif: consume
-    WorkerNotif->>Email: send (PrivateBin link, expiry, cluster details)
+    WorkerNotif->>Email: send (secure-paste link, expiry, cluster details)
     Email-->>WorkerNotif: delivered
     WorkerNotif->>Q_H: publish welcome-email.sent
     Q_H->>Scribe: consume [state: handoff_complete]
 
     Scribe->>Q_H: publish handoff.complete
     Q_H->>Messenger: consume
-    Messenger->>Slack: "Cluster handoff complete - welcome email sent"
+    Messenger->>TeamChat: "Cluster handoff complete - welcome email sent"
 ```
 
 ### Deprovision Saga
@@ -1672,26 +1672,26 @@ sequenceDiagram
     participant Scribe
     participant Q_DEP as lab.deprovision.*
     participant WorkerDep as worker-deprovision
-    participant GitHub
-    participant ArgoCD
-    participant ACM
+    participant GitPlatform as git-platform
+    participant GitOps as gitops-controller
+    participant CLM as cluster-lifecycle-manager
     participant Watcher as deprovision-watcher
     participant Q_NOTIFY as notify.*
 
     Portal->>Q_DEP: publish requested
     Note over Portal: or Scribe (TTL expired)
     Q_DEP->>WorkerDep: consume
-    WorkerDep->>GitHub: move manifests to archive, open PR
+    WorkerDep->>GitPlatform: move manifests to archive, open PR
     WorkerDep->>Q_DEP: publish archive-complete
     Q_DEP->>Scribe: consume [state: deprovision_pr_opened]
 
-    GitHub->>Q_DEP: publish pr.merged
+    GitPlatform->>Q_DEP: publish pr.merged
     Q_DEP->>Scribe: consume [state: cluster_deprovisioning]
 
-    Note over ArgoCD: Prunes deleted resources
-    ArgoCD->>ACM: ClusterDeprovision CR created
+    Note over GitOps: Prunes deleted resources
+    GitOps->>CLM: ClusterDeprovision CR created
 
-    Watcher->>ACM: detect completion
+    Watcher->>CLM: detect completion
     Watcher->>Q_DEP: publish cluster-removed
     Q_DEP->>Scribe: consume [state: deprovisioned]
 
