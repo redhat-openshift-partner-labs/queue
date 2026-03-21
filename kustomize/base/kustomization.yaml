@@ -2,10 +2,10 @@
 # Kustomize base — RabbitMQ Messaging Topology
 # =============================================================================
 # Usage:
-#   kustomize build overlays/dev | kubectl apply -f -
-#   kustomize build overlays/prod | kubectl apply -f -
+#   kustomize build overlays/dev | oc apply -f -
+#   kustomize build overlays/prod | oc apply -f -
 #
-# Or via ArgoCD application pointing at overlays/{env}
+# Or via gitops-controller application pointing at overlays/{env}
 # =============================================================================
 
 apiVersion: kustomize.config.k8s.io/v1beta1

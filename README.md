@@ -17,38 +17,58 @@ This system uses a message-broker with topic exchanges to orchestrate cluster pr
 
 ### Prerequisites
 
-- Kubernetes cluster with RabbitMQ Cluster Operator installed
+- OpenShift cluster with RabbitMQ Cluster Operator installed
 - RabbitMQ Messaging Topology Operator installed
-- `kubectl` configured for target cluster
+- `oc` CLI configured for target cluster
 
 ### Deploy with Kustomize
 
 ```bash
 # Development
-kubectl apply -k kustomize/overlays/dev
+oc apply -k kustomize/overlays/dev
 
 # Production
-kubectl apply -k kustomize/overlays/prod
+oc apply -k kustomize/overlays/prod
 ```
 
 Or apply directly:
 
 ```bash
-kubectl apply -f rabbitmq-vhost.yaml
-kubectl apply -f rabbitmq-topology-manifests.yaml
-kubectl apply -f rabbitmq-users-permissions.yaml
+oc apply -f rabbitmq-vhost.yaml
+oc apply -f rabbitmq-topology-manifests.yaml
+oc apply -f rabbitmq-users-permissions.yaml
 ```
 
 ## Architecture
 
-```
-INTAKE          PROVISION       DAY-ONE         HANDOFF
-  |                 |               |               |
-  v                 v               v               v
-opl.intake --> opl.provision --> opl.day1 --> opl.handoff --> opl.notify
-                    |                               |
-                    v                               v
-              opl.deprovision                   opl.dlx (dead-letter)
+```mermaid
+flowchart LR
+    subgraph INTAKE
+        I[opl.intake]
+    end
+    subgraph LIFECYCLE
+        P[opl.provision]
+        D[opl.deprovision]
+        D1[opl.day1]
+        D2[opl.day2]
+    end
+    subgraph DELIVERY
+        H[opl.handoff]
+        N[opl.notify]
+    end
+    subgraph DLX
+        DL[opl.dlx]
+    end
+
+    I --> P
+    P --> D1
+    P --> D
+    D1 --> H
+    H --> N
+    P -.-> DL
+    D -.-> DL
+    D1 -.-> DL
+    H -.-> DL
 ```
 
 ### Components
@@ -95,8 +115,8 @@ Key metrics to watch:
 
 **Messages in DLQ:**
 ```bash
-# List DLQ depths
-rabbitmqctl list_queues name messages --vhost opl | grep dlq
+# List DLQ depths (exec into RabbitMQ pod)
+oc exec -it rabbitmq-0 -- rabbitmqctl list_queues name messages --vhost opl | grep dlq
 ```
 
 **Replay a DLQ message:**
@@ -106,7 +126,7 @@ rabbitmqctl list_queues name messages --vhost opl | grep dlq
 
 **Stuck workflow:**
 1. Find `correlation_id` from logs
-2. Query queue positions: `rabbitmqctl list_queues name messages --vhost opl`
+2. Query queue positions: `oc exec -it rabbitmq-0 -- rabbitmqctl list_queues name messages --vhost opl`
 3. Check DLQs for related failures
 
 ## Development

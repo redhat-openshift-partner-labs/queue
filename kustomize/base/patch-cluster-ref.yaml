@@ -15,4 +15,4 @@
 #   kustomize build base | \
 #     sed 's/name: opl-rabbitmq/name: YOUR_CLUSTER_NAME/g' | \
 #     sed 's/namespace: opl-system/namespace: YOUR_NAMESPACE/g' | \
-#     kubectl apply -f -
+#     oc apply -f -
