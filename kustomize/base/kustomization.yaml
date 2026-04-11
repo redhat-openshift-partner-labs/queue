@@ -14,6 +14,7 @@ kind: Kustomization
 namespace: queue
 
 resources:
-  - rabbitmq-vhost.yaml                # must sync first (sync-wave: -1)
+  - rabbitmq-cluster.yaml              # must sync first (sync-wave: -2)
+  - rabbitmq-vhost.yaml                # sync-wave: -1
   - rabbitmq-topology-manifests.yaml
   - rabbitmq-users-permissions.yaml
