@@ -481,6 +481,6 @@ spec:
     # Publishes to notify exchange (notification.sent/failed) and handoff (welcome-email.sent/failed)
     write: "^opl\\.(notify|handoff)$"
     # Consumes all notify.* queues + approval-required + handoff welcome-email.send
-    read: "^(notify\\.(user|admin)\\.[a-z-]+|lab\\.provision\\.pr\\.approval-required|handoff\\.welcome-email\\.send)$"
+    read: "^(notify\\.(user|admin|lab)\\.[a-z-]+|lab\\.provision\\.pr\\.approval-required|handoff\\.welcome-email\\.send)$"
   rabbitmqClusterReference:
     name: opl-rabbitmq

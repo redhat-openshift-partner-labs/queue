@@ -1659,6 +1659,28 @@ spec:
 apiVersion: rabbitmq.com/v1beta1
 kind: Queue
 metadata:
+  name: q-notify-lab-requested
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: notification
+    opl.io/consumer: worker-notification
+spec:
+  name: notify.lab.requested
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.notification
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
   name: q-notification-sent
   namespace: opl-system
   labels:
@@ -2928,6 +2950,21 @@ spec:
   destination: notify.admin.timeout
   destinationType: queue
   routingKey: notify.admin.timeout
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-notify-lab-requested
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.notify
+  destination: notify.lab.requested
+  destinationType: queue
+  routingKey: notify.lab.requested
   rabbitmqClusterReference:
     name: opl-rabbitmq
 
