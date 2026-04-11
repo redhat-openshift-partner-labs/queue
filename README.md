@@ -24,16 +24,17 @@ This system uses a message-broker with topic exchanges to orchestrate cluster pr
 ### Deploy with Kustomize
 
 ```bash
-# Development
-oc apply -k kustomize/overlays/dev
+# Staging (queue-dev cluster in staging namespace)
+oc apply -k kustomize/overlays/staging
 
-# Production
+# Production (queue cluster in queue namespace)
 oc apply -k kustomize/overlays/prod
 ```
 
 Or apply directly:
 
 ```bash
+oc apply -f rabbitmq-cluster.yaml
 oc apply -f rabbitmq-vhost.yaml
 oc apply -f rabbitmq-topology-manifests.yaml
 oc apply -f rabbitmq-users-permissions.yaml
@@ -170,6 +171,7 @@ See [REFERENCE.md](REFERENCE.md) for complete schemas.
 .
 ├── README.md                          # This file
 ├── REFERENCE.md                       # Complete reference documentation
+├── rabbitmq-cluster.yaml             # RabbitmqCluster CR (the broker instance)
 ├── rabbitmq-vhost.yaml               # Virtual host definition
 ├── rabbitmq-topology-manifests.yaml  # Queues, exchanges, bindings, policies
 ├── rabbitmq-users-permissions.yaml   # Per-component users and permissions
@@ -179,6 +181,6 @@ See [REFERENCE.md](REFERENCE.md) for complete schemas.
 └── kustomize/
     ├── base/                         # Base manifests
     └── overlays/
-        ├── dev/                      # Development overrides
-        └── prod/                     # Production overrides
+        ├── staging/                  # Staging: queue-dev cluster in staging namespace
+        └── prod/                     # Production: queue cluster in queue namespace
 ```
