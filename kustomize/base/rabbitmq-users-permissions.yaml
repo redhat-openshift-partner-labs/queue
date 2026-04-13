@@ -138,7 +138,7 @@ spec:
     name: opl-rabbitmq
 
 # ─────────────────────────────────────────────────────────────────────────────
-# messenger — Slack bot. Consumes dispatch notifications, publishes dispatch decisions.
+# messenger — Slack bot. Consumes dispatch notifications, publishes dispatch decisions + notifications.
 # ─────────────────────────────────────────────────────────────────────────────
 
 ---
@@ -170,8 +170,8 @@ spec:
     name: user-messenger
   permissions:
     configure: ""
-    # Publishes dispatch decisions + handoff.cluster-ready back to intake/handoff exchanges
-    write: "^opl\\.(intake|handoff)$"
+    # Publishes dispatch decisions, handoff.cluster-ready, and notification commands
+    write: "^opl\\.(intake|handoff|notify)$"
     # Consumes FYI, review-requested, handoff day1-complete-notify, handoff.complete
     read: "^(intake\\.dispatch\\.(notify-fyi|review-requested)|handoff\\.(day1-complete-notify|complete))$"
   rabbitmqClusterReference:

@@ -273,6 +273,7 @@ stateDiagram-v2
 | Queue Name                        | Publisher | Consumer(s)        | Purpose |
 |-----------------------------------|-----------|--------------------|---------|
 | `notify.lab.requested`            | scribe    | worker-notification | New lab request received and persisted — triggers Slack alert |
+| `notify.user.welcome-email`       | messenger, scribe | worker-notification | Send welcome email to user (slash-command or orchestrator triggered) |
 | `notify.user.lab-ready`           | scribe    | worker-notification | Lab active and ready |
 | `notify.user.lab-deprovisioned`   | scribe    | worker-notification | Lab torn down |
 | `notify.user.lab-expiring`        | scribe    | worker-notification | Lab approaching TTL |

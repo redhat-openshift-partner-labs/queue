@@ -77,6 +77,7 @@ This table is the authoritative binding contract. If a component is not listed f
 | **messenger** | `opl.intake` | `intake.dispatch.provision`, `intake.dispatch.review`, `intake.dispatch.provision-after-review`, `intake.dispatch.rejected` | pub | Button-click / slash-command responses |
 | **messenger** | `opl.handoff` | `handoff.day1-complete-notify`, `handoff.complete` | sub | Team-chat handoff notifications |
 | **messenger** | `opl.handoff` | `handoff.cluster-ready` | pub | `/cluster {id} ready` slash command |
+| **messenger** | `opl.notify` | `notify.user.welcome-email` | pub | Slash-command triggered welcome email |
 | **worker-provisioning** | `opl.provision` | `lab.provision.generate-manifests` | sub | Single command queue |
 | **worker-provisioning** | `opl.provision` | `lab.provision.manifests-complete`, `lab.provision.pr.*` | pub | PR lifecycle events |
 | **worker-day-one** | `opl.day1` | `lab.day1.orchestrate`, `lab.day1.*.disable`, `lab.day1.*.create`, `lab.day1.*.patch`, `lab.day1.*.set`, `lab.day1.*.configure` | sub | All day-one command verbs (see noLocal note below) |

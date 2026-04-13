@@ -7,9 +7,9 @@
 # PLACEHOLDER: Replace "opl-system" with your target namespace.
 #
 # CR types generated:
-#   - Queue       (68 queues — all pipelines + DLQs)
+#   - Queue       (70 queues — all pipelines + DLQs)
 #   - Exchange    (8 exchanges — per-domain topic + 1 DLX)
-#   - Binding     (68 bindings — route each queue to its domain exchange)
+#   - Binding     (70 bindings — route each queue to its domain exchange)
 #   - Policy      (2 policies — DLQ routing + quorum queue defaults)
 #
 # Design decisions documented inline. Gaps listed at the bottom.
@@ -1681,6 +1681,28 @@ spec:
 apiVersion: rabbitmq.com/v1beta1
 kind: Queue
 metadata:
+  name: q-notify-user-welcome-email
+  namespace: opl-system
+  labels:
+    app.kubernetes.io/part-of: opl
+    opl.io/domain: notification
+    opl.io/consumer: worker-notification
+spec:
+  name: notify.user.welcome-email
+  vhost: opl
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 5
+    x-dead-letter-exchange: opl.dlx
+    x-dead-letter-routing-key: dlq.notification
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
   name: q-notification-sent
   namespace: opl-system
   labels:
@@ -2965,6 +2987,21 @@ spec:
   destination: notify.lab.requested
   destinationType: queue
   routingKey: notify.lab.requested
+  rabbitmqClusterReference:
+    name: opl-rabbitmq
+
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: bind-notify-user-welcome-email
+  namespace: opl-system
+spec:
+  vhost: opl
+  source: opl.notify
+  destination: notify.user.welcome-email
+  destinationType: queue
+  routingKey: notify.user.welcome-email
   rabbitmqClusterReference:
     name: opl-rabbitmq
 
